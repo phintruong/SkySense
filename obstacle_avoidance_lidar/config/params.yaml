@@ -1,0 +1,77 @@
+# Obstacle Avoidance LiDAR Configuration Parameters
+# This file contains all configurable parameters for the obstacle avoidance system
+
+# Node configurations
+obstacle_avoidance_node:
+  ros__parameters:
+    # Topic names
+    scan_topic: "/scan"
+    cmd_vel_topic: "/cmd_vel"
+    
+    # Frame IDs
+    base_frame: "base_link"
+    laser_frame: "laser_link"
+    
+    # Control parameters
+    control_rate: 20.0  # Hz
+    safe_distance: 2.0  # meters
+    stop_distance: 0.5  # meters
+    base_speed: 1.0     # m/s
+    max_yaw_rate: 1.0   # rad/s
+    
+    # Processing parameters
+    sector_count: 36    # number of sectors to divide scan into
+    median_window: 5    # moving median filter window size
+    
+    # Safety parameters
+    enable_hard_brake: true
+    watchdog_timeout: 0.5  # seconds
+
+# Frame adapter configuration
+frame_adapter:
+  ros__parameters:
+    # Topic names
+    scan_topic: "/scan"
+    
+    # Frame IDs
+    frame_id: "laser_link"
+    
+    # Publishing parameters
+    publish_rate: 20.0  # Hz
+    
+    # LiDAR scan parameters
+    angle_min: -3.14159    # radians (-180 degrees)
+    angle_max: 3.14159     # radians (180 degrees)
+    angle_increment: 0.01  # radians
+    range_min: 0.1         # meters
+    range_max: 30.0        # meters
+    scan_time: 0.0         # seconds
+    time_increment: 0.0    # seconds
+
+# Fake scan publisher configuration (for testing)
+fake_scan_publisher:
+  ros__parameters:
+    # Topic names
+    scan_topic: "/scan"
+    
+    # Frame IDs
+    frame_id: "laser_link"
+    
+    # Publishing parameters
+    publish_rate: 10.0  # Hz
+    
+    # LiDAR scan parameters
+    angle_min: -3.14159    # radians (-180 degrees)
+    angle_max: 3.14159     # radians (180 degrees)
+    angle_increment: 0.01  # radians
+    range_min: 0.1         # meters
+    range_max: 30.0        # meters
+    scan_time: 0.0         # seconds
+    time_increment: 0.0    # seconds
+    
+    # Obstacle simulation parameters
+    obstacle_count: 3      # number of obstacles to simulate
+    obstacle_distance: 2.0 # typical obstacle distance
+    noise_level: 0.1       # measurement noise standard deviation
+    dynamic_obstacles: true # whether obstacles move
+
