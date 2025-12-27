@@ -4,6 +4,7 @@ Runs the LiDAR obstacle detection simulation loop.
 """
 
 import time
+import random
 from lidar_sim import generate_scan, generate_scan_with_pattern
 from logic import process_scan, DANGER_RADIUS, FORWARD_CONE_HALF_ANGLE
 
@@ -20,9 +21,12 @@ def format_action_message(action):
     return action_messages.get(action, action)
 
 
-def print_scan_summary(scan_data, action, obstacle_info):
+def print_scan_summary(scan_data, action, obstacle_info, tilt_angle=0):
     """Print a readable summary of the scan and decision."""
     print(f"[SCAN] {len(scan_data)} points received (analyzing forward cone: ±{FORWARD_CONE_HALF_ANGLE}°)")
+    if tilt_angle != 0:
+        tilt_direction = "left" if tilt_angle > 0 else "right"
+        print(f"[TILT] Drone tilted {abs(tilt_angle):.1f}° {tilt_direction} (forward cone adjusted)")
     
     if obstacle_info:
         print(f"[INFO] {len(obstacle_info)} obstacle(s) in forward cone within danger zone ({DANGER_RADIUS}m):")
@@ -48,6 +52,7 @@ def main():
     print("=" * 60)
     print(f"Danger radius: {DANGER_RADIUS}m")
     print(f"Forward cone: ±{FORWARD_CONE_HALF_ANGLE}° (analyzing direction of movement)")
+    print("Tilt angle: Random (simulating MPU/IMU data)")
     print("Press Ctrl+C to stop\n")
     
     cycle = 0
@@ -63,11 +68,16 @@ def main():
             scan_data = generate_scan()
             # scan_data = generate_scan_with_pattern()  # Uncomment for test pattern
             
-            # Process scan and determine action
-            action, obstacle_info = process_scan(scan_data)
+            # Simulate MPU/IMU tilt angle (roll angle in degrees)
+            # Positive = left roll, negative = right roll
+            # Typical range: -45° to +45° for realistic drone flight
+            tilt_angle = random.uniform(-30, 30)
+            
+            # Process scan and determine action (accounting for tilt)
+            action, obstacle_info = process_scan(scan_data, tilt_angle=tilt_angle)
             
             # Print results
-            print_scan_summary(scan_data, action, obstacle_info)
+            print_scan_summary(scan_data, action, obstacle_info, tilt_angle)
             
             # Small delay between cycles
             time.sleep(1.0)
