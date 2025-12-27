@@ -8,8 +8,8 @@ from gpiozero import DistanceSensor
 import time
 
 # GPIO pin configuration
-TRIGGER_PIN = 18  # GPIO pin for trigger (output)
-ECHO_PIN = 24     # GPIO pin for echo (input)
+TRIGGER_PIN = 24  # GPIO pin for trigger (output)
+ECHO_PIN = 23  # GPIO pin for echo (input)
 THRESHOLD_CM = 30  # Distance threshold in centimeters
 
 def notify_too_close(distance):
