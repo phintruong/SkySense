@@ -5,8 +5,8 @@ Runs the LiDAR obstacle detection simulation loop.
 
 import time
 import random
-from lidar_sim import generate_scan, generate_scan_with_pattern
-from logic import process_scan, DANGER_RADIUS, FORWARD_CONE_HALF_ANGLE
+from simulation import generate_scan, generate_scan_with_pattern
+from core import process_scan, DANGER_RADIUS, FORWARD_CONE_HALF_ANGLE
 
 
 def format_action_message(action):

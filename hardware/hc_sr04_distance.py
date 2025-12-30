@@ -14,7 +14,7 @@ THRESHOLD_CM = 30  # Distance threshold in centimeters
 
 def notify_too_close(distance):
     """Notify when object is too close"""
-    print(f"⚠️  WARNING: Object too close! Distance: {distance:.2f} cm (Threshold: {THRESHOLD_CM} cm)")
+    print(f"WARNING: Object too close! Distance: {distance:.2f} cm (Threshold: {THRESHOLD_CM} cm)")
     # You can add additional notification methods here:
     # - LED blink
     # - Buzzer sound
@@ -43,9 +43,9 @@ def main():
                 if distance_cm <= THRESHOLD_CM:
                     notify_too_close(distance_cm)
                 else:
-                    print(" ✓ Safe")
+                    print(" Safe")
             else:
-                print("⚠️  Measurement failed or out of range")
+                print("WARNING: Measurement failed or out of range")
             
             time.sleep(0.1)  # Wait 100ms between measurements
             
