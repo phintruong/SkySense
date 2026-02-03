@@ -13,11 +13,15 @@ const MODEL_PATH = '/site_model/site_model.gltf';
 const HIGHLIGHT_COLOR = new THREE.Color('#c026d3');
 const LERP_SPEED = 0.5;
 
-// Focus-on-selection: camera distance when focusing on a part (lower = zoom in more)
-const FOCUS_DISTANCE_MULTIPLIER = 0.28; // distance = part radius × this
-const FOCUS_MIN_DISTANCE = 0.18;        // minimum camera distance from part
+// Focus-on-selection: camera distance when focusing on a part (keeps view from outside, not inside)
+const FOCUS_DISTANCE_MULTIPLIER = 4;   // distance = part radius × this (was 0.28 — caused "inside drone" view)
+const FOCUS_MIN_DISTANCE = 1.2;        // minimum camera distance from part so we see part in context
 const FOCUS_ANIMATION_DURATION = 0.65;
-const FOCUS_CAMERA_ANGLE_UP = 0.15;
+const FOCUS_CAMERA_ANGLE_UP = 0.35;    // look down from above so part is visible in context
+const PARTS_PANEL_ZOOM_DISTANCE = 6.5; // zoom out when parts panel opens (default view ~5.2 from origin)
+// x4 groups (motors, motor-arms, columns): zoom all the way out so user sees entire drone
+const X4_GROUP_IDS = new Set(['motors', 'motor-arms', 'columns']);
+const FOCUS_ENTIRE_DRONE_DISTANCE = 7; // camera distance when focusing on an x4 group
 
 // --- HEAD / FRONT (forward direction) ---
 // • LiDAR is the "head" of the drone (360 LiDAR sensor-1).
@@ -84,6 +88,7 @@ function LoadedModel() {
   const setDroneMoving = useRobotStore((s) => s.setDroneMoving);
   const setDronePosition = useRobotStore((s) => s.setDronePosition);
   const showGround = useRobotStore((s) => s.showGround);
+  const partsPanelOpen = useRobotStore((s) => s.partsPanelOpen);
   const { playSound, playComponentSound } = useUISounds();
 
   const keysRef = useRef({
@@ -99,6 +104,7 @@ function LoadedModel() {
   const speedRef = useRef(0);
   const headingRef = useRef(DRONE_Y_ROTATION);
   const verticalSpeedRef = useRef(0);
+  const partsPanelCameraResetDoneRef = useRef(false);
 
   // Auto-center and scale (4 units for larger display)
   const { scaleFactor, offset, groundY } = useMemo(() => {
@@ -138,6 +144,33 @@ function LoadedModel() {
       setDroneMoving(false);
     }
   }, [showGround, setDroneSpeed, setDroneMoving]);
+
+  useEffect(() => {
+    if (!partsPanelOpen) partsPanelCameraResetDoneRef.current = false;
+  }, [partsPanelOpen]);
+
+  // When parts panel opens: reset drone and camera in useFrame so it works in drive mode too (runs before drive useFrame, so camera isn't overwritten)
+  useFrame(() => {
+    if (!partsPanelOpen || partsPanelCameraResetDoneRef.current) return;
+    if (groupRef.current) groupRef.current.position.set(0, 0, 0);
+    headingRef.current = DRONE_Y_ROTATION;
+    speedRef.current = 0;
+    verticalSpeedRef.current = 0;
+    setDroneSpeed(0);
+    setDroneMoving(false);
+    setDronePosition({ x: 0, y: 0, z: 0 });
+    const orbit = controls as OrbitControlsImpl | undefined;
+    if (orbit) {
+      orbit.target.set(0, 0, 0);
+      const dir = new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z)
+        .sub(orbit.target)
+        .normalize();
+      if (dir.lengthSq() < 0.001) dir.set(1, 1, 1).normalize();
+      camera.position.copy(orbit.target).add(dir.multiplyScalar(PARTS_PANEL_ZOOM_DISTANCE));
+      orbit.update();
+    }
+    partsPanelCameraResetDoneRef.current = true;
+  });
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -760,25 +793,41 @@ function FocusOnSelection() {
     // Start focus animation: compute in useFrame so part world position is current (after drone movement)
     if (ref.pendingPart) {
       scene.updateMatrixWorld(true);
-      let targetObject: THREE.Object3D | undefined;
-      scene.traverse((obj) => {
-        if (!(obj as THREE.Mesh).isMesh) return;
-        const partId = (obj.userData.partId as string | undefined) ?? obj.name;
-        const basePartId = partId.replace(/_\d+$/, '');
-        const selectedBase = ref.pendingPart!.replace(/_\d+$/, '');
-        if (basePartId === selectedBase || basePartId.includes(selectedBase) || selectedBase.includes(basePartId)) {
-          targetObject = obj;
-        }
-      });
+      const selectedBase = ref.pendingPart!.replace(/_\d+$/, '');
+      const groupId = getGroupForMeshId(selectedBase);
+      const isX4Group = groupId !== null && X4_GROUP_IDS.has(groupId);
+
+      let focusTarget: THREE.Vector3;
+      let distance: number;
+
+      if (isX4Group) {
+        // x4 groups (Brushless Motors, Motor Arms, Support Columns): zoom all the way out to show entire drone
+        focusTarget = new THREE.Vector3(0, 0, 0);
+        distance = FOCUS_ENTIRE_DRONE_DISTANCE;
+      } else {
+        let targetObject: THREE.Object3D | undefined;
+        scene.traverse((obj) => {
+          if (!(obj as THREE.Mesh).isMesh) return;
+          const partId = (obj.userData.partId as string | undefined) ?? obj.name;
+          const basePartId = partId.replace(/_\d+$/, '');
+          if (basePartId === selectedBase || basePartId.includes(selectedBase) || selectedBase.includes(basePartId)) {
+            targetObject = obj;
+          }
+        });
+
+        ref.pendingPart = null;
+        if (!targetObject) return;
+
+        const box = new THREE.Box3().setFromObject(targetObject);
+        const center = box.getCenter(new THREE.Vector3());
+        const sphere = box.getBoundingSphere(new THREE.Sphere());
+        const radius = Math.max(sphere.radius, 0.1);
+        distance = Math.max(radius * FOCUS_DISTANCE_MULTIPLIER, FOCUS_MIN_DISTANCE);
+        focusTarget = center.clone();
+        focusTarget.y += radius * 0.12;
+      }
 
       ref.pendingPart = null;
-      if (!targetObject) return;
-
-      const box = new THREE.Box3().setFromObject(targetObject);
-      const center = box.getCenter(new THREE.Vector3());
-      const sphere = box.getBoundingSphere(new THREE.Sphere());
-      const radius = Math.max(sphere.radius, 0.1);
-      const distance = Math.max(radius * FOCUS_DISTANCE_MULTIPLIER, FOCUS_MIN_DISTANCE);
 
       const sideDirection = new THREE.Vector3(camera.position.x - orbit.target.x, 0, camera.position.z - orbit.target.z);
       if (sideDirection.lengthSq() < 0.000001) {
@@ -787,9 +836,6 @@ function FocusOnSelection() {
       sideDirection.normalize();
 
       const direction = sideDirection.clone().add(new THREE.Vector3(0, FOCUS_CAMERA_ANGLE_UP, 0)).normalize();
-
-      const focusTarget = center.clone();
-      focusTarget.y += radius * 0.12;
 
       ref.startTarget.copy(orbit.target);
       ref.startPosition.copy(camera.position);
@@ -824,7 +870,7 @@ export default function RobotViewer() {
   return (
     <Canvas
       shadows
-      camera={{ position: [3, 3, 3], fov: 50 }}
+      camera={{ position: [2, 5.5, 5.5], fov: 50 }}
       style={{ width: '100%', height: '100%' }}
       gl={{ antialias: true }}
       onCreated={({ gl }) => {

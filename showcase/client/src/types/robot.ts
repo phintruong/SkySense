@@ -39,6 +39,8 @@ export interface RobotState {
   droneSpeed: number;
   /** True when drone is moving (for UI/sound). */
   isDroneMoving: boolean;
+  /** True when the parts panel (part mover) is open. */
+  partsPanelOpen: boolean;
 }
 
 export interface RobotActions {
@@ -60,4 +62,5 @@ export interface RobotActions {
   setDronePosition: (pos: Vector3Like | ((prev: Vector3Like) => Vector3Like)) => void;
   setDroneSpeed: (speed: number) => void;
   setDroneMoving: (moving: boolean) => void;
+  setPartsPanelOpen: (open: boolean) => void;
 }

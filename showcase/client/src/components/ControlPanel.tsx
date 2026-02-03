@@ -39,6 +39,7 @@ export default function ControlPanel() {
   const setExplodeStrength = useRobotStore((s) => s.setExplodeStrength);
   const showGround = useRobotStore((s) => s.showGround);
   const toggleGround = useRobotStore((s) => s.toggleGround);
+  const setPartsPanelOpen = useRobotStore((s) => s.setPartsPanelOpen);
 
   // Get grouped display parts
   const displayParts = useMemo(() => getDisplayParts(), []);
@@ -64,7 +65,11 @@ export default function ControlPanel() {
   return (
     <div className="fixed top-4 left-4 z-20">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          const next = !isOpen;
+          setIsOpen(next);
+          setPartsPanelOpen(next);
+        }}
         className="bg-white/90 backdrop-blur-md text-gray-700 px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium hover:bg-gray-50 transition-colors shadow-lg mb-2"
       >
         {isOpen ? 'Hide Parts' : 'Show Parts'}

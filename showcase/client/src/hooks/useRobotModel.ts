@@ -23,6 +23,7 @@ export const useRobotStore = create<RobotState & RobotActions>((set) => ({
   droneOffset: null,
   droneSpeed: 0,
   isDroneMoving: false,
+  partsPanelOpen: false,
 
   highlightParts: (partIds: string[]) => set({ highlightedParts: partIds, error: null }),
   clearHighlights: () => set({ highlightedParts: [], selectedPart: null }),
@@ -45,6 +46,7 @@ export const useRobotStore = create<RobotState & RobotActions>((set) => ({
     })),
   setDroneSpeed: (speed) => set({ droneSpeed: speed }),
   setDroneMoving: (moving) => set({ isDroneMoving: moving }),
+  setPartsPanelOpen: (open: boolean) => set({ partsPanelOpen: open }),
 
   // Sound settings actions
   setSoundEnabled: (enabled: boolean) => set({ soundEnabled: enabled }),
