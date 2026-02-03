@@ -1,46 +1,64 @@
-/** 3D robot: click parts, orbit, drive, highlights/explode. */
-import { Suspense, useRef, useMemo, useEffect, useCallback } from 'react';
+/** 3D drone viewer: click parts, orbit, highlights/explode, propeller spin. */
+import { Suspense, useRef, useMemo, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Environment, Grid, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { useRobotStore } from '../hooks/useRobotModel';
 import { useUISounds } from '../hooks/useUISounds';
+import { getGroupForMeshId, getGroupMeshIds, resolveSceneNameToCanonicalId } from '../config/robotParts';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 
-const MODEL_PATH = '/site model/Full_Assembly/Full_Assembly.gltf';
+const MODEL_PATH = '/site_model/site_model.gltf';
 
 const HIGHLIGHT_COLOR = new THREE.Color('#c026d3');
 const LERP_SPEED = 0.5;
-const MOVE_ACCEL = 5;
-const MOVE_DAMPING = 5;
-const MAX_SPEED = 4.2;
-const MAX_REVERSE = 2.6;
-const TURN_RATE = 2.6;
-const BOOST_MULT = 3;
-const WHEEL_SPIN_FACTOR = 8;
-const SMOKE_MAX = 200;
-const SMOKE_SPAWN_RATE = 50;
-const SMOKE_RISE = 0.2;
-const SMOKE_DRIFT = 0.5;
-const SMOKE_DECAY = 1.2;
-const UP_AXIS = new THREE.Vector3(0, 1, 0);
-const GRASS_SIZE = 300;
-const GRASS_REPEAT = 2; // Minimal repetition for large roads
-const GRASS_BLADE_COUNT = 2200;
-const GRASS_BLADE_HEIGHT = 0.25;
-const GRASS_BLADE_WIDTH = 0.04;
 
-const carPoseRef = {
-  position: new THREE.Vector3(),
-  heading: 0,
-};
+// Focus-on-selection: camera distance when focusing on a part (keeps view from outside, not inside)
+const FOCUS_DISTANCE_MULTIPLIER = 4;   // distance = part radius × this (was 0.28 — caused "inside drone" view)
+const FOCUS_MIN_DISTANCE = 1.2;        // minimum camera distance from part so we see part in context
+const FOCUS_ANIMATION_DURATION = 0.65;
+const FOCUS_CAMERA_ANGLE_UP = 0.35;    // look down from above so part is visible in context
+const PARTS_PANEL_ZOOM_DISTANCE = 6.5; // zoom out when parts panel opens (default view ~5.2 from origin)
+// x4 groups (motors, motor-arms, columns): zoom all the way out so user sees entire drone
+const X4_GROUP_IDS = new Set(['motors', 'motor-arms', 'columns']);
+const FOCUS_ENTIRE_DRONE_DISTANCE = 7; // camera distance when focusing on an x4 group
 
-const cameraTransitionRef = {
-  active: false,
-};
+// --- HEAD / FRONT (forward direction) ---
+// • LiDAR is the "head" of the drone (360 LiDAR sensor-1).
+// • DRONE_Y_ROTATION: initial Y rotation so LiDAR faces the direction we call "forward" (W key).
+// • heading (radians): current Y rotation; forward in world = (sin(heading), 0, cos(heading)).
+const DRONE_Y_ROTATION = Math.PI; // LiDAR faces forward (90° right from model default)
 
-// Add wheel mesh IDs here — click a wheel in the viewer to find its partId
-const WHEEL_PART_IDS: string[] = ["wheel-1", "wheel-2"];
+// Drone-specific constants
+const PROPELLER_SPIN_SPEED = 60; // Radians per second for motor spin
+
+// Drive / Fly: horizontal physics
+const MOVE_ACCEL = 8.0;
+const MOVE_DAMPING = 5.0;
+const MAX_SPEED = 7.0;
+const MAX_REVERSE = 4.0;
+const TURN_RATE = 1.2; // rad/s — lower so A/D turn visibly instead of spinning
+const BOOST_MULT = 1.6;
+
+// Vertical (fly up / fly down)
+const CLIMB_SPEED = 5.5;
+const CLIMB_ACCEL = 12.0;
+const CLIMB_DAMPING = 5.0;
+
+// Grass ground (inspired by UTRA-Hacks: https://github.com/arxvpatel/UTRA-Hacks)
+const GRASS_GROUND_SIZE = 60;
+const GRASS_REPEAT = 2;
+const GRASS_BLADE_COUNT = 1400;
+const GRASS_BLADE_HEIGHT = 0.2;
+const GRASS_BLADE_WIDTH = 0.035;
+
+// Infinite ground: lazy-load chunks around the drone (only these chunks are mounted)
+const GROUND_CHUNK_LOAD_RADIUS = 2; // chunks in each direction (5x5 = 25 chunks max)
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 // Deterministic fallback direction for meshes at the exact center
 function deterministicDir(index: number): THREE.Vector3 {
   const angle = (index + 1) * 2.399963; // golden angle
@@ -48,29 +66,31 @@ function deterministicDir(index: number): THREE.Vector3 {
 }
 
 
+function isInputFocused(): boolean {
+  const el = document.activeElement;
+  return !!(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'));
+}
+
 function LoadedModel() {
   const { scene } = useGLTF(MODEL_PATH);
+  const { camera, controls } = useThree();
   const groupRef = useRef<THREE.Group>(null);
+  const innerGroupRef = useRef<THREE.Group>(null);
 
   const highlightedParts = useRobotStore((s) => s.highlightedParts);
   const selectedPart = useRobotStore((s) => s.selectedPart);
   const selectPart = useRobotStore((s) => s.selectPart);
   const highlightParts = useRobotStore((s) => s.highlightParts);
   const explodeStrength = useRobotStore((s) => s.explodeStrength);
-  const showGround = useRobotStore((s) => s.showGround);
   const setGroundY = useRobotStore((s) => s.setGroundY);
-  const cameraMode = useRobotStore((s) => s.cameraMode);
-  const { camera, controls } = useThree();
+  const setDroneOffset = useRobotStore((s) => s.setDroneOffset);
+  const setDroneSpeed = useRobotStore((s) => s.setDroneSpeed);
+  const setDroneMoving = useRobotStore((s) => s.setDroneMoving);
+  const setDronePosition = useRobotStore((s) => s.setDronePosition);
+  const showGround = useRobotStore((s) => s.showGround);
+  const partsPanelOpen = useRobotStore((s) => s.partsPanelOpen);
   const { playSound, playComponentSound } = useUISounds();
 
-  const driftSoundRef = useRef<HTMLAudioElement | null>(null);
-  const isDriftingRef = useRef(false);
-
-  const speedRef = useRef(0);
-  const headingRef = useRef(0);
-  const headingInitRef = useRef(false);
-  const baseHeadingRef = useRef(0);
-  const baseForwardRef = useRef(new THREE.Vector3(0, 0, -1));
   const keysRef = useRef({
     forward: false,
     back: false,
@@ -78,52 +98,21 @@ function LoadedModel() {
     right: false,
     boost: false,
     brake: false,
+    flyUp: false,
+    flyDown: false,
   });
-  const smokeDataRef = useRef<{
-    positions: Float32Array;
-    colors: Float32Array;
-    velocities: Float32Array;
-    life: Float32Array;
-    cursor: number;
-  }>({
-    positions: new Float32Array(SMOKE_MAX * 3),
-    colors: new Float32Array(SMOKE_MAX * 3),
-    velocities: new Float32Array(SMOKE_MAX * 3),
-    life: new Float32Array(SMOKE_MAX),
-    cursor: 0,
-  });
-  const smokeGeometryRef = useRef<THREE.BufferGeometry>(null);
-  const smokeMaterialRef = useRef<THREE.PointsMaterial>(null);
+  const speedRef = useRef(0);
+  const headingRef = useRef(DRONE_Y_ROTATION);
+  const verticalSpeedRef = useRef(0);
+  const partsPanelCameraResetDoneRef = useRef(false);
 
-  // Clear smoke after swap to normal view
-  const resetSmoke = useCallback(() => {
-    const smoke = smokeDataRef.current;
-    for (let i = 0; i < SMOKE_MAX; i++) {
-      const base = i * 3;
-      smoke.positions[base] = 0;
-      smoke.positions[base + 1] = -999;
-      smoke.positions[base + 2] = 0;
-      smoke.colors[base] = 0;
-      smoke.colors[base + 1] = 0;
-      smoke.colors[base + 2] = 0;
-      smoke.life[i] = 0;
-    }
-    smoke.cursor = 0;
-
-    const geometry = smokeGeometryRef.current;
-    if (geometry) {
-      (geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
-      (geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
-    }
-  }, []);
-
-  // Auto-center and scale
+  // Auto-center and scale (4 units for larger display)
   const { scaleFactor, offset, groundY } = useMemo(() => {
     const box = new THREE.Box3().setFromObject(scene);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
-    const s = 2 / maxDim;
+    const s = 4 / maxDim;
     const bottomY = box.min.y * s + (-center.y * s);
     return {
       scaleFactor: s,
@@ -136,147 +125,120 @@ function LoadedModel() {
     setGroundY(groundY);
   }, [groundY, setGroundY]);
 
-  // Initialize drift sound
   useEffect(() => {
-    const audio = new Audio('/sounds/ui/drift.mp3');
-    audio.loop = true;
-    audio.volume = 0;
-    audio.preload = 'auto';
-    driftSoundRef.current = audio;
-
-    return () => {
-      audio.pause();
-      audio.src = '';
-      driftSoundRef.current = null;
-    };
-  }, []);
+    setDroneOffset({ x: offset.x, y: offset.y, z: offset.z });
+    return () => setDroneOffset(null);
+  }, [offset.x, offset.y, offset.z, setDroneOffset]);
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      // Don't capture keys when user is typing in an input field
-      const target = event.target as HTMLElement;
-      const isTyping = target?.tagName === 'INPUT' ||
-                       target?.tagName === 'TEXTAREA' ||
-                       target?.getAttribute('contenteditable') === 'true';
-      if (isTyping) return;
+    if (groupRef.current) {
+      groupRef.current.position.set(offset.x, offset.y, offset.z);
+    }
+  }, [offset.x, offset.y, offset.z]);
 
-      if (
-        ['w', 'W', 'a', 'A', 's', 'S', 'd', 'D', 'b', 'B', 'Shift', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(
-          event.key
-        )
-      ) {
-        event.preventDefault();
-      }
-      switch (event.key) {
-        case 'w':
-        case 'W':
-        case 'ArrowUp':
-          keysRef.current.forward = true;
-          break;
-        case 's':
-        case 'S':
-        case 'ArrowDown':
-          keysRef.current.back = true;
-          break;
-        case 'a':
-        case 'A':
-        case 'ArrowLeft':
-          keysRef.current.left = true;
-          break;
-        case 'd':
-        case 'D':
-        case 'ArrowRight':
-          keysRef.current.right = true;
-          break;
-        case 'b':
-        case 'B':
-          keysRef.current.boost = true;
-          break;
-        case 'Shift':
-          keysRef.current.brake = true;
-          break;
-        default:
-          break;
-      }
-    };
+  useEffect(() => {
+    if (!showGround) {
+      speedRef.current = 0;
+      verticalSpeedRef.current = 0;
+      setDroneSpeed(0);
+      setDroneMoving(false);
+    }
+  }, [showGround, setDroneSpeed, setDroneMoving]);
 
-    const handleKeyUp = (event: KeyboardEvent) => {
-      // Don't capture keys when user is typing in an input field
-      const target = event.target as HTMLElement;
-      const isTyping = target?.tagName === 'INPUT' ||
-                       target?.tagName === 'TEXTAREA' ||
-                       target?.getAttribute('contenteditable') === 'true';
-      if (isTyping) return;
+  useEffect(() => {
+    if (!partsPanelOpen) partsPanelCameraResetDoneRef.current = false;
+  }, [partsPanelOpen]);
 
-      if (
-        ['w', 'W', 'a', 'A', 's', 'S', 'd', 'D', 'b', 'B', 'Shift', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(
-          event.key
-        )
-      ) {
-        event.preventDefault();
+  // When parts panel opens: reset drone and camera in useFrame so it works in drive mode too (runs before drive useFrame, so camera isn't overwritten)
+  useFrame(() => {
+    if (!partsPanelOpen || partsPanelCameraResetDoneRef.current) return;
+    if (groupRef.current) groupRef.current.position.set(0, 0, 0);
+    headingRef.current = DRONE_Y_ROTATION;
+    speedRef.current = 0;
+    verticalSpeedRef.current = 0;
+    setDroneSpeed(0);
+    setDroneMoving(false);
+    setDronePosition({ x: 0, y: 0, z: 0 });
+    const orbit = controls as OrbitControlsImpl | undefined;
+    if (orbit) {
+      orbit.target.set(0, 0, 0);
+      const dir = new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z)
+        .sub(orbit.target)
+        .normalize();
+      if (dir.lengthSq() < 0.001) dir.set(1, 1, 1).normalize();
+      camera.position.copy(orbit.target).add(dir.multiplyScalar(PARTS_PANEL_ZOOM_DISTANCE));
+      orbit.update();
+    }
+    partsPanelCameraResetDoneRef.current = true;
+  });
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isInputFocused()) return;
+      const k = e.key.toLowerCase();
+      if (k === 'w' || e.key === 'ArrowUp') {
+        keysRef.current.forward = true;
+        e.preventDefault();
       }
-      switch (event.key) {
-        case 'w':
-        case 'W':
-        case 'ArrowUp':
-          keysRef.current.forward = false;
-          break;
-        case 's':
-        case 'S':
-        case 'ArrowDown':
-          keysRef.current.back = false;
-          break;
-        case 'a':
-        case 'A':
-        case 'ArrowLeft':
-          keysRef.current.left = false;
-          break;
-        case 'd':
-        case 'D':
-        case 'ArrowRight':
-          keysRef.current.right = false;
-          break;
-        case 'b':
-        case 'B':
-          keysRef.current.boost = false;
-          break;
-        case 'Shift':
-          keysRef.current.brake = false;
-          break;
-        default:
-          break;
+      if (k === 's' || e.key === 'ArrowDown') {
+        keysRef.current.back = true;
+        e.preventDefault();
+      }
+      if (k === 'a' || e.key === 'ArrowLeft') {
+        keysRef.current.left = true;
+        e.preventDefault();
+      }
+      if (k === 'd' || e.key === 'ArrowRight') {
+        keysRef.current.right = true;
+        e.preventDefault();
+      }
+      if (k === 'b') {
+        keysRef.current.boost = true;
+        e.preventDefault();
+      }
+      if (e.key === 'Shift') {
+        keysRef.current.brake = true;
+        e.preventDefault();
+      }
+      if (e.key === ' ') {
+        keysRef.current.flyUp = true;
+        e.preventDefault();
+      }
+      if (e.key === 'Control') {
+        keysRef.current.flyDown = true;
+        e.preventDefault();
       }
     };
-
-    const handleBlur = () => {
+    const onKeyUp = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (k === 'w' || e.key === 'ArrowUp') keysRef.current.forward = false;
+      if (k === 's' || e.key === 'ArrowDown') keysRef.current.back = false;
+      if (k === 'a' || e.key === 'ArrowLeft') keysRef.current.left = false;
+      if (k === 'd' || e.key === 'ArrowRight') keysRef.current.right = false;
+      if (k === 'b') keysRef.current.boost = false;
+      if (e.key === 'Shift') keysRef.current.brake = false;
+      if (e.key === ' ') keysRef.current.flyUp = false;
+      if (e.key === 'Control') keysRef.current.flyDown = false;
+    };
+    const onBlur = () => {
       keysRef.current.forward = false;
       keysRef.current.back = false;
       keysRef.current.left = false;
       keysRef.current.right = false;
       keysRef.current.boost = false;
       keysRef.current.brake = false;
+      keysRef.current.flyUp = false;
+      keysRef.current.flyDown = false;
     };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('blur', handleBlur);
-
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    window.addEventListener('keyup', onKeyUp, { capture: true });
+    window.addEventListener('blur', onBlur);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('keydown', onKeyDown, { capture: true });
+      window.removeEventListener('keyup', onKeyUp, { capture: true });
+      window.removeEventListener('blur', onBlur);
     };
   }, []);
-
-  useEffect(() => {
-    resetSmoke();
-  }, [resetSmoke]);
-
-  useEffect(() => {
-    if (!showGround) {
-      resetSmoke();
-    }
-  }, [showGround, resetSmoke]);
 
   // Compute the model-space center for explode directions
   const modelCenter = useMemo(() => {
@@ -301,17 +263,17 @@ function LoadedModel() {
         const mesh = child as THREE.Mesh;
 
         // Traverse up the parent chain to find the first meaningful named ancestor
-        // Skip generic names like "mesh", "group", etc.
         let baseName = '';
         let parent: THREE.Object3D | null = mesh;
 
         while (parent) {
           const name = parent.name;
           // Skip empty names and generic GLTF names
-          // Updated regex to handle multiple underscore-number sequences (e.g., mesh_8_1)
           if (name &&
               name !== 'Scene' &&
-              name !== 'UTRA Robot' &&
+              name !== 'Default' &&
+              name !== 'Full Assembly' &&
+              name !== 'current camera' &&
               !name.match(/^mesh(_\d+)*$/i) &&
               !name.match(/^group(_\d+)*$/i) &&
               !name.match(/^object(_\d+)*$/i)) {
@@ -321,28 +283,26 @@ function LoadedModel() {
           parent = parent.parent;
         }
 
-        console.log('[Discovery] Found mesh, baseName:', baseName, ', mesh.name:', mesh.name, ', parent.name:', mesh.parent?.name);
-
         // Skip meshes that don't have a meaningful name
         if (!baseName) {
-          console.log('[Discovery] Skipping mesh with no meaningful baseName');
           return;
         }
+
+        // Resolve GLTF/scene name to canonical config ID so sidebar selection matches 3D parts
+        const canonicalId = resolveSceneNameToCanonicalId(baseName);
+        const partBaseName = canonicalId ?? baseName;
 
         mesh.castShadow = true;
         mesh.receiveShadow = true;
 
         // Make partId unique by adding index if there are multiple meshes with same name
-        const count = partIdCounts.get(baseName) || 0;
-        partIdCounts.set(baseName, count + 1);
-        const partId = count > 0 ? `${baseName}_${count}` : baseName;
-
-        console.log('[Discovery] Assigned partId:', partId, 'to mesh');
+        const count = partIdCounts.get(partBaseName) || 0;
+        partIdCounts.set(partBaseName, count + 1);
+        const partId = count > 0 ? `${partBaseName}_${count}` : partBaseName;
 
         const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
         const isMaterialArray = Array.isArray(mesh.material);
         const uniqueMats = mats.map((material) => material.clone());
-        // Ensure each mesh has its own materials so highlighting doesn't affect siblings.
         mesh.material = isMaterialArray ? uniqueMats : uniqueMats[0];
 
         // Compute world-space center of this mesh for the explode direction
@@ -353,13 +313,11 @@ function LoadedModel() {
           dir.copy(deterministicDir(entries.length));
         }
         dir.normalize();
-        if (partId.startsWith('plate-') && dir.y < 0) {
-          dir.y = 0;
-          if (dir.lengthSq() < 0.000001) {
-            dir.set(0, 1, 0);
-          } else {
-            dir.normalize();
-          }
+
+        // For chassis plates, prefer horizontal explosion
+        if (baseName.includes('Chassis') || baseName.includes('Plate')) {
+          dir.y = Math.abs(dir.y) * (baseName.includes('Top') ? 1 : -1);
+          dir.normalize();
         }
 
         // Tag the mesh with its partId immediately during traversal
@@ -375,174 +333,22 @@ function LoadedModel() {
         });
       }
     });
-    console.log('[RobotViewer] Discovered parts:', entries.map((e) => e.partId));
+    console.log('[DroneViewer] Discovered parts:', entries.map((e) => e.partId));
     return entries;
   }, [scene, modelCenter]);
 
-  const wheelEntries = useMemo(
-    () => meshEntries.filter((entry) => WHEEL_PART_IDS.includes(entry.partId)),
-    [meshEntries]
-  );
-
-  useEffect(() => {
-    if (wheelEntries.length < 2) return;
-    scene.updateMatrixWorld(true);
-    const a = new THREE.Vector3();
-    const b = new THREE.Vector3();
-    wheelEntries[0].mesh.getWorldPosition(a);
-    wheelEntries[1].mesh.getWorldPosition(b);
-    const axle = b.sub(a);
-    if (axle.lengthSq() < 0.000001) return;
-    axle.normalize();
-    // Swap cross product arguments to reverse forward direction
-    const forward = new THREE.Vector3().crossVectors(axle, UP_AXIS).normalize();
-    if (forward.lengthSq() < 0.000001) return;
-    baseForwardRef.current.copy(forward);
-  }, [wheelEntries, scene]);
-
-  // Each frame: movement, highlight, explode, wheel spin, smoke
+  // Each frame: highlight, explode, propeller spin
   useFrame((_, delta) => {
-    if (!headingInitRef.current && groupRef.current) {
-      headingRef.current = groupRef.current.rotation.y;
-      baseHeadingRef.current = headingRef.current;
-      headingInitRef.current = true;
-    }
-
-    let speed = speedRef.current;
-    let spinDirection = 1;
-
-    if (showGround && groupRef.current) {
-      const throttle = (keysRef.current.forward ? 1 : 0) - (keysRef.current.back ? 1 : 0);
-      const steer = (keysRef.current.left ? 1 : 0) - (keysRef.current.right ? 1 : 0);
-      const brake = keysRef.current.brake;
-      const boost = keysRef.current.boost && throttle > 0;
-      const maxForward = boost ? MAX_SPEED * BOOST_MULT : MAX_SPEED;
-      const accelScale = boost ? BOOST_MULT : 1;
-
-      // Brake physics: apply strong deceleration when braking
-      if (brake && Math.abs(speed) > 0.1) {
-        const brakePower = 2; // Strong braking
-        const brakeDecel = Math.sign(speed) * brakePower * delta;
-        speed -= brakeDecel;
-        // Stop completely if speed is very low
-        if (Math.abs(speed) < 0.3) {
-          speed *= 0.85;
-        }
-      } else if (throttle !== 0) {
-        const accel = throttle > 0 ? MOVE_ACCEL * accelScale : MOVE_ACCEL * 1.4;
-        speed += throttle * accel * delta;
-      } else {
-        const damping = Math.exp(-MOVE_DAMPING * delta);
-        speed *= damping;
-      }
-
-      if (speed > maxForward) speed = maxForward;
-      if (speed < -MAX_REVERSE) speed = -MAX_REVERSE;
-
-      // Drift mechanics: enhanced turning when braking + turning + moving forward
-      const isDrifting = brake && steer !== 0 && speed > 1;
-      const speedFactor = Math.min(Math.abs(speed) / maxForward, 1);
-
-      if (steer !== 0) {
-        const steerDir = speed !== 0 ? Math.sign(speed) : Math.sign(throttle || 1);
-        let steerStrength = Math.max(speedFactor, throttle !== 0 ? 0.15 : 0);
-
-        // Increase turn rate during drift
-        if (isDrifting) {
-          steerStrength *= 1.8; // Boost turning during drift
-        }
-
-        if (steerStrength > 0) {
-          headingRef.current += steer * TURN_RATE * steerStrength * steerDir * delta;
-        }
-      }
-
-      // Drift sound effect
-      if (driftSoundRef.current) {
-        if (isDrifting && !isDriftingRef.current) {
-          // Start drifting
-          driftSoundRef.current.currentTime = 0;
-          driftSoundRef.current.volume = 0.3;
-          driftSoundRef.current.play().catch(() => {});
-          isDriftingRef.current = true;
-        } else if (!isDrifting && isDriftingRef.current) {
-          // Stop drifting
-          driftSoundRef.current.pause();
-          isDriftingRef.current = false;
-        } else if (isDrifting) {
-          // Adjust volume based on speed
-          const driftVolume = Math.min(0.3 + (speedFactor * 0.3), 0.6);
-          driftSoundRef.current.volume = driftVolume;
-        }
-      }
-
-      const relativeHeading = headingRef.current - baseHeadingRef.current;
-      const forward = baseForwardRef.current.clone().applyAxisAngle(UP_AXIS, relativeHeading);
-      const displacement = forward.clone().multiplyScalar(-speed * delta);
-      groupRef.current.position.add(displacement);
-      groupRef.current.rotation.y = headingRef.current;
-
-      if (cameraMode === 'third' && !cameraTransitionRef.active) {
-        const orbit = controls as OrbitControlsImpl | undefined;
-        if (orbit) {
-          orbit.target.add(displacement);
-          camera.position.add(displacement);
-        }
-      }
-
-      spinDirection = Math.sign(speed) || 1;
-    } else {
-      const damping = Math.exp(-MOVE_DAMPING * delta);
-      speed *= damping;
-    }
-
-    speedRef.current = speed;
-    if (groupRef.current) {
-      carPoseRef.position.copy(groupRef.current.position);
-      carPoseRef.heading = headingRef.current;
-    }
-
-    if (cameraMode === 'first' && groupRef.current) {
-      const relativeHeading = headingRef.current - baseHeadingRef.current;
-      const forward = baseForwardRef.current.clone().applyAxisAngle(UP_AXIS, relativeHeading);
-      const viewForward = forward.clone().multiplyScalar(-1);
-      const fpOffset = viewForward.clone().multiplyScalar(0.12).add(new THREE.Vector3(0, 0.22, 0));
-      const desiredPos = groupRef.current.position.clone().add(fpOffset);
-      const targetPos = groupRef.current.position.clone().add(viewForward.multiplyScalar(1.2));
-      const follow = 1 - Math.exp(-10 * delta);
-
-      camera.position.lerp(desiredPos, follow);
-      camera.lookAt(targetPos);
-
-      const orbit = controls as OrbitControlsImpl | undefined;
-      if (orbit) {
-        orbit.target.lerp(targetPos, follow);
-        orbit.update();
-      }
-    }
-
     const hasHighlight = highlightedParts.length > 0;
     const pulse = 0.6 + Math.sin(Date.now() * 0.004) * 0.2;
 
-    // Debug: Log once per frame when highlighting is active
-    if (hasHighlight && Date.now() % 1000 < 16) {
-      console.log('[Highlight] highlightedParts:', highlightedParts);
-    }
-
     for (const entry of meshEntries) {
       const { mesh, partId, originals, origPos, explodeDir, currentOffset } = entry;
-      // Extract base part ID from this mesh's partId (remove _0, _1, etc. suffixes)
       const basePartIdForMesh = partId.replace(/_\d+$/, '');
-      // Match if the base part ID matches any highlighted part
       const isHighlighted = highlightedParts.some(hp => {
         const hpBase = hp.replace(/_\d+$/, '');
-        return basePartIdForMesh === hpBase;
+        return basePartIdForMesh === hpBase || basePartIdForMesh.includes(hpBase) || hpBase.includes(basePartIdForMesh);
       });
-
-      // Debug: Log highlighting decisions for all parts once
-      if (hasHighlight && Date.now() % 2000 < 16) {
-        console.log(`[Highlight] partId: ${partId}, basePartId: ${basePartIdForMesh}, isHighlighted: ${isHighlighted}, highlightedParts:`, highlightedParts);
-      }
 
       const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
 
@@ -556,7 +362,6 @@ function LoadedModel() {
           std.color.copy(HIGHLIGHT_COLOR);
           std.emissive.copy(HIGHLIGHT_COLOR);
           std.emissiveIntensity = pulse * 3;
-          // Remove all texture maps to show color
           std.map = null;
           std.normalMap = null;
           std.roughnessMap = null;
@@ -569,12 +374,10 @@ function LoadedModel() {
           std.depthTest = true;
           std.blending = THREE.NormalBlending;
           std.wireframe = false;
-          std.wireframeLinewidth = orig.wireframeLinewidth;
         } else if (hasHighlight) {
           std.color.copy(orig.color);
           std.emissive.set('#000000');
           std.emissiveIntensity = 0;
-          // Restore all texture maps
           std.map = orig.map;
           std.normalMap = orig.normalMap;
           std.roughnessMap = orig.roughnessMap;
@@ -587,7 +390,6 @@ function LoadedModel() {
           std.depthTest = true;
           std.blending = THREE.NormalBlending;
           std.wireframe = false;
-          std.wireframeLinewidth = orig.wireframeLinewidth;
         } else {
           std.color.copy(orig.color);
           std.emissive.copy(orig.emissive);
@@ -604,7 +406,6 @@ function LoadedModel() {
           std.depthTest = orig.depthTest;
           std.blending = orig.blending;
           std.wireframe = orig.wireframe;
-          std.wireframeLinewidth = orig.wireframeLinewidth;
         }
 
         if (std.transparent !== prevTransparent) {
@@ -612,7 +413,7 @@ function LoadedModel() {
         }
       });
 
-      // --- Explode: push non-highlighted parts outward, lerp back when no selection ---
+      // --- Explode: push non-highlighted parts outward ---
       const targetOffset = new THREE.Vector3();
       if (hasHighlight && !isHighlighted) {
         const explodeWorld = explodeStrength / 100;
@@ -623,73 +424,101 @@ function LoadedModel() {
       currentOffset.lerp(targetOffset, LERP_SPEED);
       mesh.position.copy(origPos).add(currentOffset);
 
-      // --- Wheel spin: rotate wheel meshes based on speed ---
-      const basePartId = partId.replace(/_\d+$/, '');
-      if (WHEEL_PART_IDS.includes(basePartId)) {
-        const direction = basePartId === 'wheel-2' ? -1 : 1;
-        const spin = speed * WHEEL_SPIN_FACTOR * delta * spinDirection;
-        // eslint-disable-next-line react-hooks/immutability -- imperative Three.js mutation in useFrame
-        mesh.rotation.z += spin * direction;
-      }
-    }
-
-    if (showGround && wheelEntries.length > 0 && smokeGeometryRef.current && smokeMaterialRef.current) {
-      const smoke = smokeDataRef.current;
-      const positions = smoke.positions;
-      const colors = smoke.colors;
-      const velocities = smoke.velocities;
-      const life = smoke.life;
-
-      const spawnCount = Math.min(
-        wheelEntries.length * 2,
-        Math.floor(speed * SMOKE_SPAWN_RATE * delta)
-      );
-
-      for (let i = 0; i < spawnCount; i++) {
-        const wheel = wheelEntries[i % wheelEntries.length].mesh;
-        const wheelPos = new THREE.Vector3();
-        wheel.getWorldPosition(wheelPos);
-
-        const idx = smoke.cursor % SMOKE_MAX;
-        const base = idx * 3;
-        positions[base] = wheelPos.x + (Math.random() - 0.5) * 0.08;
-        positions[base + 1] = wheelPos.y + 0.02;
-        positions[base + 2] = wheelPos.z + (Math.random() - 0.5) * 0.08;
-
-        velocities[base] = (Math.random() - 0.5) * SMOKE_DRIFT;
-        velocities[base + 1] = SMOKE_RISE + Math.random() * 0.4;
-        velocities[base + 2] = (Math.random() - 0.5) * SMOKE_DRIFT;
-
-        life[idx] = 1;
-        colors[base] = 0.6;
-        colors[base + 1] = 0.6;
-        colors[base + 2] = 0.6;
-
-        smoke.cursor += 1;
-      }
-
-      for (let i = 0; i < SMOKE_MAX; i++) {
-        if (life[i] <= 0) continue;
-        const base = i * 3;
-        positions[base] += velocities[base] * delta;
-        positions[base + 1] += velocities[base + 1] * delta;
-        positions[base + 2] += velocities[base + 2] * delta;
-        velocities[base + 1] += 0.2 * delta;
-        life[i] -= SMOKE_DECAY * delta;
-        const fade = Math.max(life[i], 0);
-        colors[base] = 0.6 * fade;
-        colors[base + 1] = 0.6 * fade;
-        colors[base + 2] = 0.6 * fade;
-        if (life[i] <= 0) {
-          positions[base + 1] = -999;
+      // --- Propeller spin: each arm (1 motor + 2 blades) spins as one unit, horizontally (Y). Spin only while any move key is pressed (W/S/A/D/Space/Ctrl); stop instantly when all released. ---
+      // Arm numbering (from model/config): Arm 1 = crude motor-1, Motor Arm 1-1, Propeller Blade-1,2. Arm 2 = motor-2, Arm 1-2, Blade-3,4. Arm 3 = motor-3, Arm 1-3, Blade-5,6. Arm 4 = motor-4, Arm 1-4, Blade-7,8.
+      const keys = keysRef.current;
+      const isMoving = keys.forward || keys.back || keys.flyUp || keys.flyDown || keys.left || keys.right;
+      if (isMoving) {
+        let armIndex: number;
+        if (basePartIdForMesh.includes('crude motor')) {
+          armIndex = parseInt(basePartIdForMesh.match(/\d+/)?.[0] || '1');
+        } else if (basePartIdForMesh.includes('Propeller Blade')) {
+          const bladeIndex = parseInt(basePartIdForMesh.match(/\d+/)?.[0] || '1');
+          armIndex = Math.ceil(bladeIndex / 2); // Blade-1,2 -> arm 1; Blade-3,4 -> arm 2; etc.
+        } else {
+          armIndex = 0;
+        }
+        if (armIndex >= 1 && armIndex <= 4) {
+          // Diagonal pairs same direction (1&4, 2&3) so the two on the right (2 and 4) spin opposite and look correct
+          const direction = (armIndex === 2 || armIndex === 3) ? 1 : -1;
+          mesh.rotation.y += PROPELLER_SPIN_SPEED * delta * direction;
         }
       }
-
-      const positionAttr = smokeGeometryRef.current.getAttribute('position') as THREE.BufferAttribute;
-      const colorAttr = smokeGeometryRef.current.getAttribute('color') as THREE.BufferAttribute;
-      positionAttr.needsUpdate = true;
-      colorAttr.needsUpdate = true;
     }
+  });
+
+  // Drive / Fly: same as car (horizontal physics + steer) + fly up/down; camera follows
+  useFrame((_, delta) => {
+    if (!showGround || !groupRef.current || !innerGroupRef.current) return;
+    const orbit = controls as OrbitControlsImpl | undefined;
+    if (!orbit) return;
+
+    const keys = keysRef.current;
+    const throttle = (keys.forward ? 1 : 0) - (keys.back ? 1 : 0); // W = forward, S = back
+    const steer = (keys.left ? 1 : 0) - (keys.right ? 1 : 0);       // Turn left/right: A = left, D = right
+
+    let speed = speedRef.current;
+    if (throttle !== 0) {
+      const accel = throttle * MOVE_ACCEL * delta;
+      const boost = keys.boost ? BOOST_MULT : 1;
+      speed += accel * boost;
+    } else if (keys.brake) {
+      const brake = Math.sign(speed) * (-MOVE_DAMPING * delta * 2);
+      speed += brake;
+      if (Math.abs(speed) < 0.01) speed = 0;
+    } else {
+      speed *= Math.exp(-MOVE_DAMPING * delta);
+    }
+    speed = clamp(speed, -MAX_REVERSE, MAX_SPEED);
+    speedRef.current = speed;
+
+    const heading = headingRef.current;
+    headingRef.current = heading - steer * TURN_RATE * delta; // A = turn left, D = turn right
+
+    // Forward = direction head/cone points (local +X): world (sin(heading), 0, cos(heading)). W/S move along this.
+    const forwardX = Math.cos(headingRef.current);
+    const forwardZ = Math.sin(headingRef.current);
+    const displacement = new THREE.Vector3(
+      forwardX * (speed * delta),
+      0,
+      forwardZ * (speed * delta)
+    );
+
+    groupRef.current.position.add(displacement);
+
+    const climb = (keys.flyUp ? 1 : 0) - (keys.flyDown ? 1 : 0);
+    let vSpeed = verticalSpeedRef.current;
+    if (climb !== 0) {
+      vSpeed += climb * CLIMB_ACCEL * delta;
+    } else {
+      vSpeed *= Math.exp(-CLIMB_DAMPING * delta);
+    }
+    vSpeed = clamp(vSpeed, -CLIMB_SPEED, CLIMB_SPEED);
+    verticalSpeedRef.current = vSpeed;
+
+    const verticalDelta = vSpeed * delta;
+    groupRef.current.position.y += verticalDelta;
+
+    // Negate heading so head turns right when D (move right) and left when A (move left)
+    innerGroupRef.current.rotation.y = -headingRef.current;
+
+    orbit.target.add(displacement);
+    orbit.target.y += verticalDelta;
+    camera.position.add(displacement);
+    camera.position.y += verticalDelta;
+
+    setDroneSpeed(Math.abs(speed));
+    setDroneMoving(Math.abs(speed) > 0.01 || Math.abs(vSpeed) > 0.01);
+  });
+
+  // Sync drone position every frame (for infinite ground chunks and UI)
+  useFrame(() => {
+    if (!groupRef.current) return;
+    setDronePosition({
+      x: groupRef.current.position.x,
+      y: groupRef.current.position.y,
+      z: groupRef.current.position.z,
+    });
   });
 
   // Track previous explode strength for sound effects
@@ -701,13 +530,10 @@ function LoadedModel() {
     const prev = prevExplodeStrengthRef.current;
     const diff = Math.abs(explodeStrength - prev);
 
-    // Only play sound if change is significant (more than 5 units)
     if (diff > 5) {
       if (explodeStrength < prev) {
-        // Parts coming together (assembling)
         playSound('attach-part', 0.7);
       } else {
-        // Parts moving apart (disassembling)
         playSound('detach-part', 0.7);
       }
     }
@@ -715,12 +541,11 @@ function LoadedModel() {
     prevExplodeStrengthRef.current = explodeStrength;
   }, [explodeStrength, playSound]);
 
-  // Play sound when part is unselected and parts come back together
+  // Play sound when part is unselected
   useEffect(() => {
     const prevSelected = prevSelectedPartRef.current;
     const currentSelected = selectedPart;
 
-    // If we had a selection and now we don't (unselected)
     if (prevSelected !== null && currentSelected === null) {
       playSound('attach-part', 0.8);
     }
@@ -728,59 +553,40 @@ function LoadedModel() {
     prevSelectedPartRef.current = currentSelected;
   }, [selectedPart, playSound]);
 
-  // Click handler — use the clicked mesh's partId directly
+  // Click handler - highlights entire group if part belongs to one
   const handleClick = (e: { object: THREE.Object3D; stopPropagation: () => void }) => {
     e.stopPropagation();
     const partId = e.object.userData.partId as string | undefined;
-    console.log('[Click] Clicked mesh partId:', partId);
     if (partId) {
-      // Extract base part ID (remove _0, _1, etc. suffixes from multi-mesh components)
       const basePartId = partId.replace(/_\d+$/, '');
-      console.log('[Click] Base partId:', basePartId);
-      console.log('[Click] Setting highlightedParts and selectedPart to:', basePartId);
-
-      // Play component-specific sound
       playComponentSound(basePartId);
 
-      // Always set both highlighted and selected to ensure sync
-      highlightParts([basePartId]);
-      selectPart(basePartId);
+      // Check if this part belongs to a group
+      const groupId = getGroupForMeshId(basePartId);
+      if (groupId) {
+        // Highlight all parts in the group
+        const groupMeshIds = getGroupMeshIds(groupId);
+        highlightParts(groupMeshIds);
+        selectPart(groupMeshIds[0]); // Focus on first part of group
+      } else {
+        highlightParts([basePartId]);
+        selectPart(basePartId);
+      }
     }
   };
 
+  // Outer group position set in useEffect(offset) and updated in useFrame when Drive/Fly is on. Inner group rotation.y set in useFrame.
   return (
-    <>
-      <group ref={groupRef}>
+    <group ref={groupRef}>
+      <group ref={innerGroupRef} rotation={[0, DRONE_Y_ROTATION, 0]}>
         <primitive
           object={scene}
           scale={scaleFactor}
-          position={offset}
+          position={[offset.x, offset.y, offset.z]}
           onClick={handleClick}
         />
       </group>
-      <points frustumCulled={false}>
-        <bufferGeometry ref={smokeGeometryRef}>
-          <bufferAttribute
-            attach="attributes-position"
-            args={[smokeDataRef.current.positions, 3]}
-          />
-          <bufferAttribute
-            attach="attributes-color"
-            args={[smokeDataRef.current.colors, 3]}
-          />
-        </bufferGeometry>
-        <pointsMaterial
-          ref={smokeMaterialRef}
-          size={0.05}
-          color="#9ca3af"
-          vertexColors
-          transparent
-          opacity={0.6}
-          depthWrite={false}
-          sizeAttenuation
-        />
-      </points>
-    </>
+    </group>
   );
 }
 
@@ -793,204 +599,25 @@ function LoadingFallback() {
   );
 }
 
-function FocusOnSelection() {
-  const selectedPart = useRobotStore((s) => s.selectedPart);
-  const cameraMode = useRobotStore((s) => s.cameraMode);
-  const { camera, scene, controls } = useThree();
-  const focusRef = useRef({
-    active: false,
-    elapsed: 0,
-    duration: 0.65,
-    startTarget: new THREE.Vector3(),
-    startPosition: new THREE.Vector3(),
-    endTarget: new THREE.Vector3(),
-    endPosition: new THREE.Vector3(),
-  });
-
-  useEffect(() => {
-    const orbit = controls as OrbitControlsImpl | undefined;
-    if (!orbit || !selectedPart || cameraMode === 'first') {
-      focusRef.current.active = false;
-      return;
-    }
-
-    let targetObject: THREE.Object3D | undefined;
-    scene.traverse((obj) => {
-      if (!(obj as THREE.Mesh).isMesh) return;
-      const partId = (obj.userData.partId as string | undefined) ?? obj.name;
-      // Extract base part ID and match with selectedPart
-      const basePartId = partId.replace(/_\d+$/, '');
-      const selectedBase = selectedPart.replace(/_\d+$/, '');
-      if (basePartId === selectedBase) {
-        targetObject = obj;
-      }
-    });
-
-    if (!targetObject) return;
-    targetObject.updateWorldMatrix(true, true);
-
-    const box = new THREE.Box3().setFromObject(targetObject);
-    const center = box.getCenter(new THREE.Vector3());
-    const modelBox = new THREE.Box3().setFromObject(scene);
-    const modelCenter = modelBox.getCenter(new THREE.Vector3());
-    const sphere = box.getBoundingSphere(new THREE.Sphere());
-    const radius = Math.max(sphere.radius, 0.1);
-    const distance = Math.max(radius * 4, 0.8);
-
-    const sideDirection = new THREE.Vector3(center.x - modelCenter.x, 0, center.z - modelCenter.z);
-    if (sideDirection.lengthSq() < 0.000001) {
-      sideDirection.copy(camera.position).sub(orbit.target).setY(0);
-      if (sideDirection.lengthSq() < 0.000001) {
-        sideDirection.set(1, 0, 1);
-      }
-    }
-    sideDirection.normalize();
-
-    const direction = sideDirection.add(new THREE.Vector3(0, 0.35, 0)).normalize();
-
-    const focusTarget = center.clone();
-    focusTarget.y += radius * 0.12;
-
-    focusRef.current.startTarget.copy(orbit.target);
-    focusRef.current.startPosition.copy(camera.position);
-    focusRef.current.endTarget.copy(focusTarget);
-    focusRef.current.endPosition.copy(focusTarget).add(direction.multiplyScalar(distance));
-    focusRef.current.elapsed = 0;
-    focusRef.current.active = true;
-  }, [selectedPart, scene, camera, controls]);
-
-  useFrame((_, delta) => {
-    const orbit = controls as OrbitControlsImpl | undefined;
-    if (!orbit || !focusRef.current.active) return;
-    focusRef.current.elapsed += delta;
-    const t = Math.min(focusRef.current.elapsed / focusRef.current.duration, 1);
-    const eased = t * t * (3 - 2 * t);
-    orbit.target.lerpVectors(focusRef.current.startTarget, focusRef.current.endTarget, eased);
-    camera.position.lerpVectors(focusRef.current.startPosition, focusRef.current.endPosition, eased);
-    orbit.update();
-    if (t >= 1) {
-      focusRef.current.active = false;
-    }
-  });
-
-  return null;
-}
-
-function GrassGround({ groundY }: { groundY: number }) {
-  const grassTexture = useMemo(() => {
-    const size = 2048; // Much larger texture for continuous roads
+/** Shared grass canvas texture (tileable). */
+function useGrassTexture() {
+  return useMemo(() => {
+    const size = 2048;
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
-
-    // Draw grass background (scaled for larger texture)
     ctx.fillStyle = '#4ade80';
     ctx.fillRect(0, 0, size, size);
     ctx.fillStyle = '#22c55e';
-    for (let i = 0; i < 20000; i++) { // More grass details for larger texture
-      const x = Math.random() * size;
-      const y = Math.random() * size;
-      const h = 3 + Math.random() * 6;
-      const w = 1 + Math.random();
-      ctx.fillRect(x, y, w, h);
+    for (let i = 0; i < 20000; i++) {
+      ctx.fillRect(Math.random() * size, Math.random() * size, 1 + Math.random(), 3 + Math.random() * 6);
     }
     ctx.fillStyle = '#16a34a';
     for (let i = 0; i < 15000; i++) {
-      const x = Math.random() * size;
-      const y = Math.random() * size;
-      const h = 2 + Math.random() * 5;
-      const w = 1 + Math.random();
-      ctx.fillRect(x, y, w, h);
+      ctx.fillRect(Math.random() * size, Math.random() * size, 1 + Math.random(), 2 + Math.random() * 5);
     }
-
-    // Generate random curvy roads (scaled for larger texture)
-    const roadCount = 2 + Math.floor(Math.random() * 2); // 2-3 roads for better spacing
-    const roadWidth = 60; // Much wider roads for the larger texture
-
-    for (let r = 0; r < roadCount; r++) {
-      // Generate random control points for smooth curves
-      const points: { x: number; y: number }[] = [];
-      const pointCount = 4 + Math.floor(Math.random() * 3); // 4-6 control points for simpler, more spread out roads
-
-      // Random starting edge (top, bottom, left, or right)
-      const startEdge = Math.floor(Math.random() * 4);
-      let startX = 0, startY = 0;
-
-      if (startEdge === 0) { // top
-        startX = Math.random() * size;
-        startY = 0;
-      } else if (startEdge === 1) { // right
-        startX = size;
-        startY = Math.random() * size;
-      } else if (startEdge === 2) { // bottom
-        startX = Math.random() * size;
-        startY = size;
-      } else { // left
-        startX = 0;
-        startY = Math.random() * size;
-      }
-
-      points.push({ x: startX, y: startY });
-
-      // Generate middle points with wider spread and less overlap
-      for (let i = 1; i < pointCount - 1; i++) {
-        const progress = i / (pointCount - 1);
-        // Use road index to offset paths and prevent clustering
-        const roadOffset = (r / roadCount) * size;
-        const baseX = progress * size * 0.4 + roadOffset;
-        const baseY = progress * size * 0.4 + roadOffset;
-        const offsetX = (Math.random() - 0.5) * size * 0.5;
-        const offsetY = (Math.random() - 0.5) * size * 0.5;
-        points.push({
-          x: Math.max(0, Math.min(size, baseX + offsetX)),
-          y: Math.max(0, Math.min(size, baseY + offsetY))
-        });
-      }
-
-      // Random ending edge (different from start)
-      const endEdge = (startEdge + 1 + Math.floor(Math.random() * 3)) % 4;
-      let endX = 0, endY = 0;
-
-      if (endEdge === 0) {
-        endX = Math.random() * size;
-        endY = 0;
-      } else if (endEdge === 1) {
-        endX = size;
-        endY = Math.random() * size;
-      } else if (endEdge === 2) {
-        endX = Math.random() * size;
-        endY = size;
-      } else {
-        endX = 0;
-        endY = Math.random() * size;
-      }
-
-      points.push({ x: endX, y: endY });
-
-      // Draw the road using smooth curves (grey pavement)
-      ctx.strokeStyle = '#6b7280'; // grey
-      ctx.lineWidth = roadWidth;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.beginPath();
-      ctx.moveTo(points[0].x, points[0].y);
-
-      // Use quadratic curves for smooth transitions
-      for (let i = 1; i < points.length - 1; i++) {
-        const xc = (points[i].x + points[i + 1].x) / 2;
-        const yc = (points[i].y + points[i + 1].y) / 2;
-        ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
-      }
-
-      // Final segment
-      const lastPoint = points[points.length - 1];
-      const secondLastPoint = points[points.length - 2];
-      ctx.quadraticCurveTo(secondLastPoint.x, secondLastPoint.y, lastPoint.x, lastPoint.y);
-      ctx.stroke();
-    }
-
     const texture = new THREE.CanvasTexture(canvas);
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
@@ -999,27 +626,78 @@ function GrassGround({ groundY }: { groundY: number }) {
     texture.repeat.set(GRASS_REPEAT, GRASS_REPEAT);
     return texture;
   }, []);
+}
+
+/** Single grass chunk (one tile). Lazy-loaded by InfiniteGrassGround. */
+function GrassChunk({
+  cx,
+  cz,
+  groundY,
+  texture,
+}: {
+  cx: number;
+  cz: number;
+  groundY: number;
+  texture: THREE.CanvasTexture | null;
+}) {
+  const x = cx * GRASS_GROUND_SIZE + GRASS_GROUND_SIZE / 2;
+  const z = cz * GRASS_GROUND_SIZE + GRASS_GROUND_SIZE / 2;
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x, groundY, z]} receiveShadow>
+      <planeGeometry args={[GRASS_GROUND_SIZE, GRASS_GROUND_SIZE]} />
+      <meshStandardMaterial
+        map={texture ?? undefined}
+        color="#4ade80"
+        roughness={0.95}
+        metalness={0}
+      />
+    </mesh>
+  );
+}
+
+/** Instanced grass blades (one field centered at chunk center). */
+function GrassBlades({
+  groundY,
+  centerX,
+  centerZ,
+}: {
+  groundY: number;
+  centerX: number;
+  centerZ: number;
+}) {
+  const bladeGeo = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
+  const bladeMat = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: '#22c55e',
+        roughness: 0.9,
+        metalness: 0,
+        side: THREE.DoubleSide,
+      }),
+    []
+  );
 
   const bladeMatrices = useMemo(() => {
     const transforms: THREE.Matrix4[] = [];
     const temp = new THREE.Object3D();
+    const radius = GRASS_GROUND_SIZE * 0.45;
     for (let i = 0; i < GRASS_BLADE_COUNT; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const radius = Math.random() * (GRASS_SIZE * 0.45);
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
+      const r = Math.random() * radius;
+      const x = Math.cos(angle) * r;
+      const z = Math.sin(angle) * r;
       const height = GRASS_BLADE_HEIGHT * (0.6 + Math.random() * 0.6);
       const width = GRASS_BLADE_WIDTH * (0.6 + Math.random() * 0.6);
       const tilt = (Math.random() - 0.5) * 0.4;
 
-      temp.position.set(x, groundY + height * 0.5, z);
+      temp.position.set(x, height * 0.5, z);
       temp.rotation.set(tilt, Math.random() * Math.PI * 2, 0);
       temp.scale.set(width, height, 1);
       temp.updateMatrix();
       transforms.push(temp.matrix.clone());
     }
     return transforms;
-  }, [groundY]);
+  }, []);
 
   const bladesRef = useRef<THREE.InstancedMesh>(null);
 
@@ -1032,116 +710,151 @@ function GrassGround({ groundY }: { groundY: number }) {
   }, [bladeMatrices]);
 
   return (
+    <group position={[centerX, groundY, centerZ]}>
+      <instancedMesh ref={bladesRef} args={[bladeGeo, bladeMat, GRASS_BLADE_COUNT]} castShadow receiveShadow />
+    </group>
+  );
+}
+
+/** Infinite ground: only chunks near the drone are mounted (lazy load). Grass blades at drone chunk. */
+function InfiniteGrassGround({ groundY }: { groundY: number }) {
+  const dronePosition = useRobotStore((s) => s.dronePosition);
+  const texture = useGrassTexture();
+
+  const chunks = useMemo(() => {
+    const cx0 = Math.floor(dronePosition.x / GRASS_GROUND_SIZE);
+    const cz0 = Math.floor(dronePosition.z / GRASS_GROUND_SIZE);
+    const list: { cx: number; cz: number }[] = [];
+    for (let dx = -GROUND_CHUNK_LOAD_RADIUS; dx <= GROUND_CHUNK_LOAD_RADIUS; dx++) {
+      for (let dz = -GROUND_CHUNK_LOAD_RADIUS; dz <= GROUND_CHUNK_LOAD_RADIUS; dz++) {
+        list.push({ cx: cx0 + dx, cz: cz0 + dz });
+      }
+    }
+    return list;
+  }, [dronePosition.x, dronePosition.z]);
+
+  const chunkCenter = useMemo(() => {
+    const cx0 = Math.floor(dronePosition.x / GRASS_GROUND_SIZE);
+    const cz0 = Math.floor(dronePosition.z / GRASS_GROUND_SIZE);
+    return {
+      x: cx0 * GRASS_GROUND_SIZE + GRASS_GROUND_SIZE / 2,
+      z: cz0 * GRASS_GROUND_SIZE + GRASS_GROUND_SIZE / 2,
+    };
+  }, [dronePosition.x, dronePosition.z]);
+
+  return (
     <>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, groundY, 0]} receiveShadow>
-        <planeGeometry args={[GRASS_SIZE, GRASS_SIZE]} />
-        <meshStandardMaterial
-          color="#4ade80"
-          map={grassTexture ?? undefined}
-          roughness={0.9}
-          metalness={0}
-        />
-      </mesh>
-      <instancedMesh
-        ref={bladesRef}
-        args={[undefined, undefined, GRASS_BLADE_COUNT]}
-        frustumCulled={false}
-        castShadow
-        receiveShadow
-      >
-        <planeGeometry args={[1, 1]} />
-        <meshStandardMaterial color="#22c55e" roughness={0.9} metalness={0} side={THREE.DoubleSide} />
-      </instancedMesh>
+      {chunks.map(({ cx, cz }) => (
+        <GrassChunk key={`${cx},${cz}`} cx={cx} cz={cz} groundY={groundY} texture={texture} />
+      ))}
+      <GrassBlades groundY={groundY} centerX={chunkCenter.x} centerZ={chunkCenter.z} />
     </>
   );
 }
 
-function CameraRig() {
-  const cameraMode = useRobotStore((s) => s.cameraMode);
-  const { camera, controls } = useThree();
-  const lastThirdRef = useRef<{ offset: THREE.Vector3; targetOffset: THREE.Vector3 } | null>(null);
-  const transitionRef = useRef<{
+function FocusOnSelection() {
+  const selectedPart = useRobotStore((s) => s.selectedPart);
+  const { camera, scene, controls } = useThree();
+  const focusRef = useRef<{
     active: boolean;
+    pendingPart: string | null;
     elapsed: number;
     duration: number;
-    startOffset: THREE.Vector3;
-    endOffset: THREE.Vector3;
-    startTargetOffset: THREE.Vector3;
-    endTargetOffset: THREE.Vector3;
+    startTarget: THREE.Vector3;
+    startPosition: THREE.Vector3;
+    endTarget: THREE.Vector3;
+    endPosition: THREE.Vector3;
   }>({
     active: false,
+    pendingPart: null,
     elapsed: 0,
-    duration: 0.6,
-    startOffset: new THREE.Vector3(),
-    endOffset: new THREE.Vector3(),
-    startTargetOffset: new THREE.Vector3(),
-    endTargetOffset: new THREE.Vector3(),
+    duration: FOCUS_ANIMATION_DURATION,
+    startTarget: new THREE.Vector3(),
+    startPosition: new THREE.Vector3(),
+    endTarget: new THREE.Vector3(),
+    endPosition: new THREE.Vector3(),
   });
 
   useEffect(() => {
-    const orbit = controls as OrbitControlsImpl | undefined;
-    if (!orbit) return;
-
-    if (cameraMode === 'first') {
-      const carPos = carPoseRef.position;
-      lastThirdRef.current = {
-        offset: camera.position.clone().sub(carPos),
-        targetOffset: orbit.target.clone().sub(carPos),
-      };
-      transitionRef.current.active = false;
-      cameraTransitionRef.active = false;
+    if (!selectedPart) {
+      focusRef.current.active = false;
+      focusRef.current.pendingPart = null;
       return;
     }
-
-    if (lastThirdRef.current) {
-      const carPos = carPoseRef.position;
-      transitionRef.current.active = true;
-      cameraTransitionRef.active = true;
-      transitionRef.current.elapsed = 0;
-      transitionRef.current.startOffset.copy(camera.position).sub(carPos);
-      transitionRef.current.endOffset.copy(lastThirdRef.current.offset);
-      transitionRef.current.startTargetOffset.copy(orbit.target).sub(carPos);
-      transitionRef.current.endTargetOffset.copy(lastThirdRef.current.targetOffset);
-    }
-  }, [cameraMode, camera, controls]);
-
-  useFrame(() => {
-    const orbit = controls as OrbitControlsImpl | undefined;
-    if (!orbit) return;
-    if (cameraMode !== 'third') return;
-    if (transitionRef.current.active) return;
-    const carPos = carPoseRef.position;
-    lastThirdRef.current = {
-      offset: camera.position.clone().sub(carPos),
-      targetOffset: orbit.target.clone().sub(carPos),
-    };
-  });
+    focusRef.current.pendingPart = selectedPart;
+  }, [selectedPart]);
 
   useFrame((_, delta) => {
     const orbit = controls as OrbitControlsImpl | undefined;
     if (!orbit) return;
-    if (!transitionRef.current.active) {
-      cameraTransitionRef.active = false;
+
+    const ref = focusRef.current;
+
+    // Start focus animation: compute in useFrame so part world position is current (after drone movement)
+    if (ref.pendingPart) {
+      scene.updateMatrixWorld(true);
+      const selectedBase = ref.pendingPart!.replace(/_\d+$/, '');
+      const groupId = getGroupForMeshId(selectedBase);
+      const isX4Group = groupId !== null && X4_GROUP_IDS.has(groupId);
+
+      let focusTarget: THREE.Vector3;
+      let distance: number;
+
+      if (isX4Group) {
+        // x4 groups (Brushless Motors, Motor Arms, Support Columns): zoom all the way out to show entire drone
+        focusTarget = new THREE.Vector3(0, 0, 0);
+        distance = FOCUS_ENTIRE_DRONE_DISTANCE;
+      } else {
+        let targetObject: THREE.Object3D | undefined;
+        scene.traverse((obj) => {
+          if (!(obj as THREE.Mesh).isMesh) return;
+          const partId = (obj.userData.partId as string | undefined) ?? obj.name;
+          const basePartId = partId.replace(/_\d+$/, '');
+          if (basePartId === selectedBase || basePartId.includes(selectedBase) || selectedBase.includes(basePartId)) {
+            targetObject = obj;
+          }
+        });
+
+        ref.pendingPart = null;
+        if (!targetObject) return;
+
+        const box = new THREE.Box3().setFromObject(targetObject);
+        const center = box.getCenter(new THREE.Vector3());
+        const sphere = box.getBoundingSphere(new THREE.Sphere());
+        const radius = Math.max(sphere.radius, 0.1);
+        distance = Math.max(radius * FOCUS_DISTANCE_MULTIPLIER, FOCUS_MIN_DISTANCE);
+        focusTarget = center.clone();
+        focusTarget.y += radius * 0.12;
+      }
+
+      ref.pendingPart = null;
+
+      const sideDirection = new THREE.Vector3(camera.position.x - orbit.target.x, 0, camera.position.z - orbit.target.z);
+      if (sideDirection.lengthSq() < 0.000001) {
+        sideDirection.set(1, 0, 1);
+      }
+      sideDirection.normalize();
+
+      const direction = sideDirection.clone().add(new THREE.Vector3(0, FOCUS_CAMERA_ANGLE_UP, 0)).normalize();
+
+      ref.startTarget.copy(orbit.target);
+      ref.startPosition.copy(camera.position);
+      ref.endTarget.copy(focusTarget);
+      ref.endPosition.copy(focusTarget).add(direction.multiplyScalar(distance));
+      ref.elapsed = 0;
+      ref.active = true;
       return;
     }
 
-    transitionRef.current.elapsed += delta;
-    const t = Math.min(transitionRef.current.elapsed / transitionRef.current.duration, 1);
+    if (!ref.active) return;
+    ref.elapsed += delta;
+    const t = Math.min(ref.elapsed / ref.duration, 1);
     const eased = t * t * (3 - 2 * t);
-
-    const carPos = carPoseRef.position;
-    const startPos = carPos.clone().add(transitionRef.current.startOffset);
-    const endPos = carPos.clone().add(transitionRef.current.endOffset);
-    const startTarget = carPos.clone().add(transitionRef.current.startTargetOffset);
-    const endTarget = carPos.clone().add(transitionRef.current.endTargetOffset);
-
-    camera.position.lerpVectors(startPos, endPos, eased);
-    orbit.target.lerpVectors(startTarget, endTarget, eased);
+    orbit.target.lerpVectors(ref.startTarget, ref.endTarget, eased);
+    camera.position.lerpVectors(ref.startPosition, ref.endPosition, eased);
     orbit.update();
-
     if (t >= 1) {
-      transitionRef.current.active = false;
-      cameraTransitionRef.active = false;
+      ref.active = false;
     }
   });
 
@@ -1150,15 +863,14 @@ function CameraRig() {
 
 export default function RobotViewer() {
   const clearHighlights = useRobotStore((s) => s.clearHighlights);
-  const showGround = useRobotStore((s) => s.showGround);
   const groundY = useRobotStore((s) => s.groundY);
-  const cameraMode = useRobotStore((s) => s.cameraMode);
+  const showGround = useRobotStore((s) => s.showGround);
   const controlsRef = useRef<OrbitControlsImpl>(null);
 
   return (
     <Canvas
       shadows
-      camera={{ position: [3, 3, 3], fov: 50 }}
+      camera={{ position: [2, 5.5, 5.5], fov: 50 }}
       style={{ width: '100%', height: '100%' }}
       gl={{ antialias: true }}
       onCreated={({ gl }) => {
@@ -1186,37 +898,34 @@ export default function RobotViewer() {
       </Suspense>
 
       <FocusOnSelection />
-      <CameraRig />
 
-      {showGround ? (
-        <GrassGround groundY={groundY} />
-      ) : (
-        <Grid
-          args={[20, 20]}
-          position={[0, groundY, 0]}
-          cellSize={0.5}
-          cellThickness={0.5}
-          cellColor="#cbd5e1"
-          sectionSize={2}
-          sectionThickness={1}
-          sectionColor="#94a3b8"
-          fadeDistance={15}
-          fadeStrength={1}
-          infiniteGrid
-        />
+      {showGround && (
+        <>
+          <InfiniteGrassGround groundY={groundY} />
+          <Grid
+            args={[20, 20]}
+            position={[0, groundY, 0]}
+            cellSize={0.5}
+            cellThickness={0.5}
+            cellColor="#cbd5e1"
+            sectionSize={2}
+            sectionThickness={1}
+            sectionColor="#94a3b8"
+            fadeDistance={15}
+            fadeStrength={1}
+            infiniteGrid
+          />
+        </>
       )}
 
       <OrbitControls
         ref={controlsRef}
         makeDefault
-        enableDamping={cameraMode === 'third'}
+        enableDamping
         dampingFactor={0.1}
         minDistance={0.5}
         maxDistance={20}
         maxPolarAngle={Math.PI / 2 - 0.05}
-        enableRotate={cameraMode === 'third'}
-        enablePan={cameraMode === 'third'}
-        enableZoom={cameraMode === 'third'}
       />
     </Canvas>
   );

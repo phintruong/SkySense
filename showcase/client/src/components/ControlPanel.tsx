@@ -1,7 +1,8 @@
 /** Left panel: parts list, search, explode slider, drive toggle. */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRobotStore } from '../hooks/useRobotModel';
 import { getAllParts, getApiStatus } from '../services/api';
+import { getDisplayParts, type DisplayPart } from '../config/robotParts';
 import type { PartCategory } from '../types/robot';
 
 const categories: { label: string; value: PartCategory | 'all' }[] = [
@@ -28,7 +29,6 @@ export default function ControlPanel() {
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<PartCategory | 'all'>('all');
 
-  const parts = useRobotStore((s) => s.parts);
   const highlightedParts = useRobotStore((s) => s.highlightedParts);
   const setParts = useRobotStore((s) => s.setParts);
   const setApiStatus = useRobotStore((s) => s.setApiStatus);
@@ -39,13 +39,17 @@ export default function ControlPanel() {
   const setExplodeStrength = useRobotStore((s) => s.setExplodeStrength);
   const showGround = useRobotStore((s) => s.showGround);
   const toggleGround = useRobotStore((s) => s.toggleGround);
+  const setPartsPanelOpen = useRobotStore((s) => s.setPartsPanelOpen);
+
+  // Get grouped display parts
+  const displayParts = useMemo(() => getDisplayParts(), []);
 
   useEffect(() => {
     getAllParts().then(setParts).catch(console.error);
     getApiStatus().then(setApiStatus).catch(console.error);
   }, [setParts, setApiStatus]);
 
-  const filtered = parts.filter((p) => {
+  const filtered = displayParts.filter((p) => {
     const matchesCategory = activeCategory === 'all' || p.category === activeCategory;
     const matchesSearch =
       !search ||
@@ -53,10 +57,19 @@ export default function ControlPanel() {
     return matchesCategory && matchesSearch;
   });
 
+  // Check if a display part is active (any of its mesh IDs are highlighted)
+  const isPartActive = (part: DisplayPart) => {
+    return part.meshIds.some((meshId) => highlightedParts.includes(meshId));
+  };
+
   return (
     <div className="fixed top-4 left-4 z-20">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          const next = !isOpen;
+          setIsOpen(next);
+          setPartsPanelOpen(next);
+        }}
         className="bg-white/90 backdrop-blur-md text-gray-700 px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium hover:bg-gray-50 transition-colors shadow-lg mb-2"
       >
         {isOpen ? 'Hide Parts' : 'Show Parts'}
@@ -75,6 +88,29 @@ export default function ControlPanel() {
             />
           </div>
 
+          {/* Drive / Fly mode: round toggle like a switch */}
+          <div className="px-3 py-2 border-b border-gray-200 flex items-center justify-between">
+            <div>
+              <div className="text-[10px] text-gray-500 uppercase tracking-wide">Drive / Fly</div>
+              <div className="text-[9px] text-gray-400 mt-0.5">WASD · Space ↑ Ctrl ↓ · B boost Shift brake</div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showGround}
+              onClick={toggleGround}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                showGround ? 'bg-blue-600' : 'bg-gray-200'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ${
+                  showGround ? 'translate-x-5' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
+
           {/* Explode strength */}
           <div className="px-3 py-2 border-b border-gray-200">
             <div className="flex items-center justify-between mb-1">
@@ -89,23 +125,6 @@ export default function ControlPanel() {
               onChange={(e) => setExplodeStrength(Number(e.target.value))}
               className="w-full h-1 accent-blue-600 cursor-pointer"
             />
-          </div>
-
-          {/* Drive toggle */}
-          <div className="px-3 py-2 border-b border-gray-200 flex items-center justify-between">
-            <label className="text-[10px] text-gray-500 uppercase tracking-wide">Drive</label>
-            <button
-              onClick={toggleGround}
-              className={`relative w-8 h-4 rounded-full transition-colors ${
-                showGround ? 'bg-blue-600' : 'bg-gray-300'
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${
-                  showGround ? 'translate-x-4' : ''
-                }`}
-              />
-            </button>
           </div>
 
           {/* Category filters */}
@@ -128,13 +147,15 @@ export default function ControlPanel() {
           {/* Parts list */}
           <div className="max-h-[45vh] overflow-y-auto custom-scrollbar">
             {filtered.map((part) => {
-              const isActive = highlightedParts.includes(part.id);
+              const isActive = isPartActive(part);
               return (
                 <button
                   key={part.id}
                   onClick={() => {
-                    highlightParts([part.id]);
-                    selectPart(part.id);
+                    // Highlight all mesh IDs in the group
+                    highlightParts(part.meshIds);
+                    // Select the first mesh ID for camera focus
+                    selectPart(part.meshIds[0]);
                   }}
                   title={part.description}
                   className={`w-full text-left px-3 py-2 flex items-start gap-2 hover:bg-gray-100 transition-colors border-b border-gray-100 ${

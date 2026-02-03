@@ -15,69 +15,72 @@ type TourStep = {
 
 const TOUR_STEPS: TourStep[] = [
   {
-    title: 'Wheels',
-    summary: 'The front and rear wheels provide locomotion. We tested every tire we had and tuned the drive for the red and green tracks.',
+    title: '360° LiDAR Sensor',
+    summary: 'The LiDAR sensor is the "head" of the drone, providing 360-degree environmental scanning for navigation and obstacle detection.',
     parts: [
-      { id: 'wheel-1', role: 'Front/right wheel. Primary motion component for robot movement.' },
-      { id: 'wheel-2', role: 'Rear/left wheel. Works with wheel-1 for stable driving and turns.' },
-    ],
-  },
-  {
-    title: 'Base Plate',
-    summary: 'The laser-cut base plate is the structural foundation. Everything mounts to it: wheels, Arduino, sensors, and power.',
-    parts: [
-      { id: 'plate-1', role: 'Base plate. Supports all components and keeps the chassis rigid.' },
-    ],
-  },
-  {
-    title: 'IR Sensors',
-    summary: 'Infrared proximity sensors detect obstacles and line edges. We use them for obstacle avoidance on the red track and line following.',
-    parts: [
-      { id: 'sensor-1', role: 'Left IR sensor. Detects obstacles and reflectance for line following.' },
-      { id: 'sensor-2', role: 'Right IR sensor. Paired with sensor-1 for symmetric detection.' },
+      { id: '360 LiDAR sensor-1', role: 'Primary navigation sensor. Scans the environment in all directions for mapping and obstacle avoidance.' },
     ],
   },
   {
     title: 'Ultrasonic Sensor',
-    summary: 'The ultrasonic distance sensor measures the distance to obstacles ahead using sound waves. Critical for obstacle detection and avoidance on the red track.',
+    summary: 'The HC-SR04 ultrasonic sensor provides precise distance measurements for close-range obstacle detection.',
     parts: [
-      { id: 'ultrasonic-sensor-1', role: 'Ultrasonic distance sensor. Continuously monitors distance ahead to detect obstacles.' },
+      { id: 'HCSR04 Ultrasonic Sensor-1', role: 'Distance sensor. Uses sound waves to measure proximity to nearby objects.' },
     ],
   },
   {
-    title: 'Color Sensor',
-    summary: 'The color/light sensor detects surface colors beneath the robot. Used for line following, detecting blue walls, and finding the black center in the bullseye challenge.',
+    title: 'Propulsion Motors',
+    summary: 'Four brushless motors provide lift and thrust. Opposing motors spin in opposite directions for stability.',
     parts: [
-      { id: 'color-sensor-1', role: 'Color/light sensor. Detects red lines, blue walls, black center, and other surface colors.' },
+      { id: 'crude motor-1', role: 'Motor #1. Generates thrust for lift and directional control.' },
+      { id: 'crude motor-2', role: 'Motor #2. Works with motor #1 for balanced flight.' },
+      { id: 'crude motor-3', role: 'Motor #3. Paired with motor #4 for stability.' },
+      { id: 'crude motor-4', role: 'Motor #4. Completes the quadcopter configuration.' },
     ],
   },
   {
-    title: 'Arduino Brain',
-    summary: 'The Arduino Uno runs all our code: line following, obstacle avoidance, bullseye centering, and shooting logic.',
+    title: 'Motor Arms',
+    summary: 'The motor arms extend from the chassis to position the motors at optimal distance for stable flight.',
     parts: [
-      { id: 'arduino-1', role: 'Main microcontroller. Reads sensors, drives motors, and runs the challenge algorithms.' },
+      { id: 'Motor Arm 1-1', role: 'Arm #1. Structural support for motor positioning.' },
+      { id: 'Motor Arm 1-2', role: 'Arm #2. Maintains motor spacing for flight dynamics.' },
+      { id: 'Motor Arm 1-3', role: 'Arm #3. Part of the X-configuration frame.' },
+      { id: 'Motor Arm 1-4', role: 'Arm #4. Completes the quadcopter frame structure.' },
     ],
   },
   {
-    title: 'Motor Driver',
-    summary: 'The L298N motor driver takes low-power signals from the Arduino and drives the wheel motors at the right speed and direction.',
+    title: 'Chassis Frame',
+    summary: 'The two-plate chassis design houses all internal components while providing structural rigidity.',
     parts: [
-      { id: 'motor-driver-1', role: 'H-bridge motor driver. Controls speed and direction of both wheels.' },
+      { id: 'Chassis - Bottom Plate-1', role: 'Bottom plate. Foundation for mounting components.' },
+      { id: 'Chassis - Top Plate-2', role: 'Top plate. Protects components and mounts LiDAR sensor.' },
     ],
   },
   {
-    title: 'Breadboard',
-    summary: 'The breadboard lets us wire sensors and logic without soldering. Easy to change during testing.',
+    title: 'Support Columns',
+    summary: 'Four columns connect the top and bottom plates, creating space for internal electronics.',
     parts: [
-      { id: 'breadboard-1', role: 'Solderless prototyping board. Connects Arduino, sensors, and power cleanly.' },
+      { id: 'Column-1', role: 'Structural spacer providing vertical support.' },
+      { id: 'Column-2', role: 'Maintains plate separation and rigidity.' },
+      { id: 'Column-3', role: 'Part of the four-corner support system.' },
+      { id: 'Column-4', role: 'Completes the internal frame structure.' },
     ],
   },
   {
-    title: 'Power',
-    summary: '67, 67 67 67 67 six seven SIX SEVEN',
+    title: 'Raspberry Pi 4',
+    summary: 'The Raspberry Pi 4 is the brain of the drone, running Linux and flight control software.',
     parts: [
-      { id: 'battery-1', role: '67, 67 67 67 67 six seven SIX SEVEN' },
-      { id: 'battery-2', role: '67, 67 67 67 67 six seven SIX SEVEN' },
+      { id: 'Raspberry Pi 4 Model B', role: 'Main computer. Processes sensor data and controls all drone functions.' },
+      { id: 'Broadcom BCM2711B0 CPU, RPi4ModelB-1', role: 'Quad-core ARM processor running at 1.5GHz.' },
+    ],
+  },
+  {
+    title: 'Connectivity',
+    summary: 'The Pi provides WiFi, Bluetooth, USB, and Ethernet for communication and peripherals.',
+    parts: [
+      { id: 'Cypress CYW43455 Wireless Module Cover, RPi4ModelB-1', role: 'WiFi and Bluetooth module for wireless telemetry.' },
+      { id: 'Gigabit Ethernet Port, RPi4ModelB-1', role: 'Wired network for high-bandwidth data transfer.' },
+      { id: '2X USB3.0 PORTS, RPi4ModelB-2', role: 'High-speed USB for cameras and storage.' },
     ],
   },
 ];
