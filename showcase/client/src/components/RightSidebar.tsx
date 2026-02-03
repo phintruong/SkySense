@@ -1,8 +1,6 @@
-/** Right sidebar: camera, engine sound, tour. */
+/** Right sidebar: camera, tour. */
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRobotStore } from '../hooks/useRobotModel';
-import { getAvailableSounds } from '../services/api';
-import CustomSoundRecorder from './CustomSoundRecorder';
 
 type TourStepPart = {
   id: string;
@@ -84,25 +82,13 @@ const TOUR_STEPS: TourStep[] = [
   },
 ];
 
-type Section = 'none' | 'sound' | 'tour';
-
 export default function RightSidebar() {
-  const [activeSection, setActiveSection] = useState<Section>('none');
+  const [tourOpen, setTourOpen] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
 
   // Store selectors
   const cameraMode = useRobotStore((s) => s.cameraMode);
   const toggleCameraMode = useRobotStore((s) => s.toggleCameraMode);
-  const soundEnabled = useRobotStore((s) => s.soundEnabled);
-  const soundVolume = useRobotStore((s) => s.soundVolume);
-  const selectedSound = useRobotStore((s) => s.selectedSound);
-  const availableSounds = useRobotStore((s) => s.availableSounds);
-  const isLoadingSound = useRobotStore((s) => s.isLoadingSound);
-  const showGround = useRobotStore((s) => s.showGround);
-  const setSoundEnabled = useRobotStore((s) => s.setSoundEnabled);
-  const setSoundVolume = useRobotStore((s) => s.setSoundVolume);
-  const setSelectedSound = useRobotStore((s) => s.setSelectedSound);
-  const setAvailableSounds = useRobotStore((s) => s.setAvailableSounds);
   const parts = useRobotStore((s) => s.parts);
   const highlightedParts = useRobotStore((s) => s.highlightedParts);
   const selectedPart = useRobotStore((s) => s.selectedPart);
@@ -115,11 +101,6 @@ export default function RightSidebar() {
     highlightedParts: string[];
     selectedPart: string | null;
   } | null>(null);
-
-  // Load sounds on mount
-  useEffect(() => {
-    getAvailableSounds().then(setAvailableSounds).catch(console.error);
-  }, [setAvailableSounds]);
 
   // Tour logic
   const clampedIndex = Math.min(Math.max(stepIndex, 0), TOUR_STEPS.length - 1);
@@ -137,7 +118,7 @@ export default function RightSidebar() {
   }, [parts, step.parts]);
 
   useEffect(() => {
-    if (activeSection !== 'tour') return;
+    if (!tourOpen) return;
     const ids = Array.from(new Set(step.parts.map((part) => part.id)));
     if (ids.length > 0) {
       highlightParts(ids);
@@ -145,7 +126,7 @@ export default function RightSidebar() {
       clearHighlights();
     }
     selectPart(null);
-  }, [activeSection, step.parts, highlightParts, clearHighlights, selectPart]);
+  }, [tourOpen, step.parts, highlightParts, clearHighlights, selectPart]);
 
   const startTour = () => {
     previousSelectionRef.current = {
@@ -154,12 +135,12 @@ export default function RightSidebar() {
     };
     setTourActive(true);
     setStepIndex(0);
-    setActiveSection('tour');
+    setTourOpen(true);
   };
 
   const endTour = () => {
     setTourActive(false);
-    setActiveSection('none');
+    setTourOpen(false);
     const previous = previousSelectionRef.current;
     if (previous) {
       highlightParts(previous.highlightedParts);
@@ -183,15 +164,11 @@ export default function RightSidebar() {
     setStepIndex((current) => Math.min(current + 1, TOUR_STEPS.length - 1));
   };
 
-  const toggleSection = (section: Section) => {
-    if (section === 'tour') {
-      if (activeSection === 'tour') {
-        endTour();
-      } else {
-        startTour();
-      }
+  const toggleTour = () => {
+    if (tourOpen) {
+      endTour();
     } else {
-      setActiveSection(activeSection === section ? 'none' : section);
+      startTour();
     }
   };
 
@@ -225,139 +202,10 @@ export default function RightSidebar() {
           </button>
         </div>
 
-        {/* Engine Sound Section */}
-        <div className="border-b border-gray-200">
-          <button
-            onClick={() => toggleSection('sound')}
-            className="w-full px-3 py-2 flex items-center justify-between hover:bg-gray-50 transition-colors"
-          >
-            <div className="flex items-center gap-2">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4 text-gray-500"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
-                />
-              </svg>
-              <span className="text-xs text-gray-700 font-medium">Engine Sound</span>
-            </div>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className={`h-4 w-4 text-gray-400 transition-transform ${activeSection === 'sound' ? 'rotate-180' : ''}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-
-          {activeSection === 'sound' && (
-            <div className="px-3 pb-3 space-y-2">
-              {/* Enable/Disable toggle */}
-              <div className="flex items-center justify-between">
-                <label className="text-[10px] text-gray-500 uppercase tracking-wide">Sound</label>
-                <button
-                  onClick={() => setSoundEnabled(!soundEnabled)}
-                  className={`relative w-8 h-4 rounded-full transition-colors ${
-                    soundEnabled ? 'bg-blue-600' : 'bg-gray-300'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${
-                      soundEnabled ? 'translate-x-4' : ''
-                    }`}
-                  />
-                </button>
-              </div>
-
-              {/* Volume slider */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[10px] text-gray-500 uppercase tracking-wide">Volume</label>
-                  <span className="text-[10px] text-gray-400">{Math.round(soundVolume * 100)}%</span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={soundVolume}
-                  onChange={(e) => setSoundVolume(Number(e.target.value))}
-                  className="w-full h-1 accent-blue-600 cursor-pointer"
-                  disabled={!soundEnabled}
-                />
-              </div>
-
-              {/* Sound selection */}
-              <div>
-                <label className="text-[10px] text-gray-500 uppercase tracking-wide block mb-1">
-                  Engine Type
-                </label>
-                <div className="max-h-[150px] overflow-y-auto custom-scrollbar space-y-1">
-                  {availableSounds.map((sound) => {
-                    const isSelected = selectedSound?.id === sound.id;
-                    return (
-                      <button
-                        key={sound.id}
-                        onClick={() => setSelectedSound(sound)}
-                        disabled={!soundEnabled}
-                        className={`w-full text-left px-2 py-1.5 rounded-lg transition-colors ${
-                          isSelected
-                            ? 'bg-blue-100 text-blue-700 border border-blue-200'
-                            : 'hover:bg-gray-100 text-gray-700 border border-transparent'
-                        } ${!soundEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      >
-                        <div className="text-xs font-medium">{sound.name}</div>
-                        <div className="text-[10px] text-gray-400">{sound.description}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Custom Sound Recorder */}
-              <div>
-                <CustomSoundRecorder />
-              </div>
-
-              {/* Status */}
-              <div className="text-center">
-                {isLoadingSound ? (
-                  <div className="flex items-center justify-center gap-2 text-[10px] text-blue-600">
-                    <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      />
-                    </svg>
-                    Generating sound...
-                  </div>
-                ) : selectedSound ? (
-                  <div className="text-[10px] text-gray-400">
-                    {showGround ? 'Drive to hear engine!' : 'Enable Drive mode first'}
-                  </div>
-                ) : (
-                  <div className="text-[10px] text-gray-400">Select an engine sound</div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* Tour Guide Section */}
         <div>
           <button
-            onClick={() => toggleSection('tour')}
+            onClick={toggleTour}
             className="w-full px-3 py-2 flex items-center justify-between hover:bg-gray-50 transition-colors"
           >
             <div className="flex items-center gap-2">
@@ -379,7 +227,7 @@ export default function RightSidebar() {
             </div>
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              className={`h-4 w-4 text-gray-400 transition-transform ${activeSection === 'tour' ? 'rotate-180' : ''}`}
+              className={`h-4 w-4 text-gray-400 transition-transform ${tourOpen ? 'rotate-180' : ''}`}
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -388,7 +236,7 @@ export default function RightSidebar() {
             </svg>
           </button>
 
-          {activeSection === 'tour' && (
+          {tourOpen && (
             <div className="px-3 pb-3">
               <div className="mb-2">
                 <div className="text-[10px] text-gray-400 uppercase tracking-wide">Step {clampedIndex + 1} of {TOUR_STEPS.length}</div>

@@ -1,6 +1,6 @@
-/** Global state: highlights, selection, parts, camera, sound. */
+/** Global state: highlights, selection, parts, camera, sound settings. */
 import { create } from 'zustand';
-import type { RobotState, RobotActions, RobotPart, ApiStatus, EngineSound } from '../types/robot';
+import type { RobotState, RobotActions, RobotPart, ApiStatus } from '../types/robot';
 
 export const useRobotStore = create<RobotState & RobotActions>((set) => ({
   highlightedParts: [],
@@ -15,14 +15,9 @@ export const useRobotStore = create<RobotState & RobotActions>((set) => ({
   cameraMode: 'third',
   tourActive: false,
 
-  // Sound state
+  // Sound settings (for UI sounds)
   soundEnabled: true,
   soundVolume: 0.5,
-  selectedSound: null,
-  availableSounds: [],
-  isLoadingSound: false,
-  carSpeed: 0,
-  isCarMoving: false,
 
   highlightParts: (partIds: string[]) => set({ highlightedParts: partIds, error: null }),
   clearHighlights: () => set({ highlightedParts: [], selectedPart: null }),
@@ -38,12 +33,7 @@ export const useRobotStore = create<RobotState & RobotActions>((set) => ({
     set((state) => ({ cameraMode: state.cameraMode === 'third' ? 'first' : 'third' })),
   setTourActive: (active: boolean) => set({ tourActive: active }),
 
-  // Sound actions
+  // Sound settings actions
   setSoundEnabled: (enabled: boolean) => set({ soundEnabled: enabled }),
   setSoundVolume: (volume: number) => set({ soundVolume: volume }),
-  setSelectedSound: (sound: EngineSound | null) => set({ selectedSound: sound }),
-  setAvailableSounds: (sounds: EngineSound[]) => set({ availableSounds: sounds }),
-  setIsLoadingSound: (loading: boolean) => set({ isLoadingSound: loading }),
-  setCarSpeed: (speed: number) => set({ carSpeed: speed }),
-  setIsCarMoving: (moving: boolean) => set({ isCarMoving: moving }),
 }));

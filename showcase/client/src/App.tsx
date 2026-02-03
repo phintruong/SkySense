@@ -1,9 +1,8 @@
-/** Main app: 3D robot, parts list, sidebar, sound. */
+/** Main app: 3D robot, parts list, sidebar. */
 import RobotViewer from './components/RobotViewer';
 import ControlPanel from './components/ControlPanel';
 import PartInfoPanel from './components/PartInfoPanel';
 import RightSidebar from './components/RightSidebar';
-import SoundController from './components/SoundController';
 
 export default function App() {
   return (
@@ -12,7 +11,6 @@ export default function App() {
       <ControlPanel />
       <PartInfoPanel />
       <RightSidebar />
-      <SoundController />
 
       {/* Title */}
       <div className="fixed top-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none">

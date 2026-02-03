@@ -1,4 +1,4 @@
-/** Types for parts, state, sound. */
+/** Types for parts and state. */
 export type PartCategory = 'motion' | 'sensors' | 'power' | 'control' | 'structure' | 'communication';
 
 export interface RobotPart {
@@ -7,13 +7,15 @@ export interface RobotPart {
   description: string;
   keywords: string[];
   category: PartCategory;
+  relatedTo?: string[];
+  functionalRole?: string;
 }
 
 export interface ApiStatus {
   demoMode: boolean;
 }
 
-export interface RobotState extends SoundState {
+export interface RobotState {
   highlightedParts: string[];
   selectedPart: string | null;
   isLoading: boolean;
@@ -25,36 +27,11 @@ export interface RobotState extends SoundState {
   groundY: number;
   cameraMode: 'third' | 'first';
   tourActive: boolean;
-}
-
-export interface EngineSound {
-  id: string;
-  name: string;
-  description: string;
-  audioUrl?: string;
-}
-
-export interface SoundState {
   soundEnabled: boolean;
   soundVolume: number;
-  selectedSound: EngineSound | null;
-  availableSounds: EngineSound[];
-  isLoadingSound: boolean;
-  carSpeed: number;
-  isCarMoving: boolean;
 }
 
-export interface SoundActions {
-  setSoundEnabled: (enabled: boolean) => void;
-  setSoundVolume: (volume: number) => void;
-  setSelectedSound: (sound: EngineSound | null) => void;
-  setAvailableSounds: (sounds: EngineSound[]) => void;
-  setIsLoadingSound: (loading: boolean) => void;
-  setCarSpeed: (speed: number) => void;
-  setIsCarMoving: (moving: boolean) => void;
-}
-
-export interface RobotActions extends SoundActions {
+export interface RobotActions {
   highlightParts: (partIds: string[]) => void;
   clearHighlights: () => void;
   selectPart: (partId: string | null) => void;
@@ -67,4 +44,6 @@ export interface RobotActions extends SoundActions {
   setGroundY: (y: number) => void;
   toggleCameraMode: () => void;
   setTourActive: (active: boolean) => void;
+  setSoundEnabled: (enabled: boolean) => void;
+  setSoundVolume: (volume: number) => void;
 }

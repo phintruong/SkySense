@@ -1,7 +1,6 @@
-/** Robot parts list (id, name, keywords, category). Used by viewer and keyword matching. */
-import type { RobotPart, PartCategory } from '../types/index.js';
+/** Robot parts data and search logic. Migrated from server. */
+import type { RobotPart, PartCategory } from '../types/robot';
 
-// Enhanced part metadata with relationships and functional descriptions
 const partMetadata: Record<string, {
   category: PartCategory;
   keywords: string[];
@@ -103,7 +102,6 @@ function formatName(id: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// All mesh names from the UTRA robot model
 const meshNames = [
   'wheel-1',
   'wheel-2',
@@ -146,19 +144,27 @@ export function getPartsByCategory(category: PartCategory): RobotPart[] {
   return robotParts.filter((p) => p.category === category);
 }
 
-export function getAllPartIds(): string[] {
-  return robotParts.map((p) => p.id);
+export function getAllParts(): RobotPart[] {
+  return robotParts;
 }
 
-export function getPartsListForAI(): string {
-  return robotParts
-    .map(
-      (p) =>
-        `- ID: "${p.id}" | Name: ${p.name} | Category: ${p.category}
-  Description: ${p.description}
-  Function: ${p.functionalRole}
-  Related Parts: ${p.relatedTo?.join(', ') || 'none'}
-  Keywords: ${p.keywords.join(', ')}`
-    )
-    .join('\n\n');
+export function searchParts(query: string): RobotPart[] {
+  const q = query.toLowerCase();
+  return robotParts.filter((part) => {
+    const searchable = [
+      part.name,
+      part.description,
+      part.id,
+      ...part.keywords,
+    ]
+      .join(' ')
+      .toLowerCase();
+    return q.split(/\s+/).some((word) => word.length > 1 && searchable.includes(word));
+  });
+}
+
+export function getRelatedParts(partId: string): RobotPart[] {
+  const part = getPartById(partId);
+  if (!part) return [];
+  return getPartsByCategory(part.category).filter((p) => p.id !== partId);
 }

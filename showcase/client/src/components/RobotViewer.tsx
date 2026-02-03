@@ -60,8 +60,6 @@ function LoadedModel() {
   const showGround = useRobotStore((s) => s.showGround);
   const setGroundY = useRobotStore((s) => s.setGroundY);
   const cameraMode = useRobotStore((s) => s.cameraMode);
-  const setCarSpeed = useRobotStore((s) => s.setCarSpeed);
-  const setIsCarMoving = useRobotStore((s) => s.setIsCarMoving);
   const { camera, controls } = useThree();
   const { playSound, playComponentSound } = useUISounds();
 
@@ -499,8 +497,6 @@ function LoadedModel() {
     }
 
     speedRef.current = speed;
-    setCarSpeed(speed);
-    setIsCarMoving(Math.abs(speed) > 0.1);
     if (groupRef.current) {
       carPoseRef.position.copy(groupRef.current.position);
       carPoseRef.heading = headingRef.current;
