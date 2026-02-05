@@ -33,6 +33,7 @@ class RPLidarResponse(IntEnum):
     INFO = 0x04
     HEALTH = 0x06
     SCAN = 0x81
+    SCAN_ALT = 0x82  # A1 can use 0x81 or 0x82 for scan data
     SAMPLE_RATE = 0x15
 
 
@@ -53,6 +54,8 @@ class RPLidarProtocol:
     
     SYNC_BYTE = 0xA5
     SYNC_BYTE2 = 0x5A
+    # Some units / clones send 0x50 as second byte (e.g. after GET_INFO) instead of 0x5A
+    SYNC_BYTE2_ALT = 0x50
     
     def __init__(self, port: str = '/dev/ttyUSB0', baudrate: int = 115200, timeout: float = 1.0):
         """
@@ -164,32 +167,54 @@ class RPLidarProtocol:
         start_time = time.time()
         
         try:
-            # Wait for sync byte
+            # Wait for sync bytes 0xA5 0x5A (read one byte at a time so junk doesn't skip sync)
+            sync_ok = False
             while time.time() - start_time < timeout:
-                if self.serial.in_waiting > 0:
-                    byte = self.serial.read(1)
-                    if byte[0] == self.SYNC_BYTE:
-                        break
+                if self.serial.in_waiting >= 1:
+                    b = self.serial.read(1)[0]
+                    if b == self.SYNC_BYTE:
+                        # Wait for second sync byte (up to 0.2s)
+                        t2 = time.time()
+                        while time.time() - t2 < 0.2:
+                            if self.serial.in_waiting >= 1:
+                                b2 = self.serial.read(1)[0]
+                                if b2 == self.SYNC_BYTE2 or b2 == self.SYNC_BYTE2_ALT:
+                                    sync_ok = True
+                                    break
+                                break  # not 0x5A/0x50, continue outer loop
+                            time.sleep(0.005)
+                        if sync_ok:
+                            break
                 time.sleep(0.01)
-            else:
+            if not sync_ok:
                 logger.warning("Timeout waiting for sync byte")
                 return None
             
-            # Read descriptor
+            # Wait for descriptor (4 bytes); some units send slowly
+            desc_deadline = time.time() + 0.3
+            while time.time() < desc_deadline and self.serial.in_waiting < 4:
+                time.sleep(0.01)
             descriptor = self.serial.read(4)
             if len(descriptor) < 4:
                 logger.warning("Incomplete descriptor")
                 return None
             
-            resp_type, data_len = struct.unpack('<BBH', descriptor)
+            resp_type, _flags, data_len = struct.unpack('<BBH', descriptor)
             
             if resp_type != expected_type:
                 logger.warning(f"Unexpected response type: {resp_type} (expected {expected_type})")
                 return None
             
-            # Read payload
+            # Read payload; wait for full payload if it arrives slowly
             if data_len > 0:
-                payload = self.serial.read(data_len)
+                payload_deadline = time.time() + 0.5
+                payload = b''
+                while len(payload) < data_len and time.time() < payload_deadline:
+                    chunk = self.serial.read(data_len - len(payload))
+                    if not chunk:
+                        time.sleep(0.01)
+                        continue
+                    payload += chunk
                 if len(payload) < data_len:
                     logger.warning("Incomplete payload")
                     return None
@@ -293,11 +318,9 @@ class RPLidarProtocol:
     def start_scan(self) -> bool:
         """
         Start scanning mode.
-        
-        Returns:
-            True if scan started successfully
+        Uses FORCE_SCAN (0x21) for better compatibility with RPLIDAR A1 on UART.
         """
-        return self._send_command(RPLidarCommand.SCAN)
+        return self._send_command(RPLidarCommand.FORCE_SCAN)
     
     def iter_scans(self, max_buf_meas: int = 3000):
         """
@@ -313,37 +336,77 @@ class RPLidarProtocol:
             logger.error("Cannot scan: serial port not open")
             return
         
+        # Flush so GET_INFO sees a clean response (no leftover bytes from motor startup)
+        self.serial.reset_input_buffer()
+        self.serial.reset_output_buffer()
+        time.sleep(0.05)
+        # Test communication: try GET_INFO first to verify device responds
+        logger.info("Testing communication with GET_INFO...")
+        info = self.get_info()
+        if info:
+            logger.info(f"Device info: Model={info.get('model')}, Serial={info.get('serial')}")
+        else:
+            logger.warning("GET_INFO failed - device may not be responding. Check baud rate/wiring.")
+            print(
+                "[UART] UART 0: Pi TX (GPIO14/pin8) → LiDAR RX; Pi RX (GPIO15/pin10) → LiDAR TX; GND → GND. "
+                "If no response, SWAP TX and RX and try again, or try baud 256000: "
+                "./run_rplidar.sh /dev/ttyAMA0 12 256000"
+            )
+        
         # Start scan
         if not self.start_scan():
             logger.error("Failed to start scan")
             return
         
-        # Wait for scan data
+        # Discard any immediate ACK/response so we start from scan stream
+        time.sleep(0.2)
+        self.serial.reset_input_buffer()
         time.sleep(0.1)
         
         points = []
         prev_angle = None
+        _debug_packets = 0
+        _debug_last_log = time.time()
         
         try:
             while True:
-                # Read scan packet
-                if self.serial.in_waiting < 5:
+                # Debug: log every 3s if no scan packets yet
+                if _debug_packets == 0 and (time.time() - _debug_last_log) > 3.0:
+                    # Try to read raw bytes to see if ANYTHING is coming
+                    raw_bytes = []
+                    if self.serial.in_waiting > 0:
+                        raw_bytes = list(self.serial.read(min(20, self.serial.in_waiting)))
+                    logger.warning(
+                        f"No scan packets yet. in_waiting={self.serial.in_waiting} "
+                        f"raw_bytes={[hex(b) for b in raw_bytes[:10]] if raw_bytes else 'none'} - check wiring/baud."
+                    )
+                    _debug_last_log = time.time()
+                
+                # Read scan packet (need 0xA5 + 0x5A + 4-byte descriptor = 6 min)
+                if self.serial.in_waiting < 6:
                     time.sleep(0.001)
                     continue
                 
-                # Check for sync byte
+                # Sync: 0xA5 then 0x5A (RPLIDAR response format)
                 byte = self.serial.read(1)
                 if byte[0] != 0xA5:
                     continue
+                byte2 = self.serial.read(1)
+                if len(byte2) < 1 or byte2[0] != 0x5A:
+                    continue
                 
-                # Read descriptor
+                # Descriptor: 4 bytes (type, flags, length_lo, length_hi)
                 descriptor = self.serial.read(4)
                 if len(descriptor) < 4:
                     continue
                 
-                resp_type, data_len = struct.unpack('<BBH', descriptor)
+                resp_type, _flags, data_len = struct.unpack('<BBH', descriptor)
                 
-                if resp_type != RPLidarResponse.SCAN:
+                if _debug_packets < 5:
+                    logger.info(f"[SCAN_DEBUG] packet resp_type=0x{resp_type:02x} data_len={data_len}")
+                _debug_packets += 1
+                
+                if resp_type not in (RPLidarResponse.SCAN, RPLidarResponse.SCAN_ALT):
                     # Skip non-scan data
                     if data_len > 0:
                         self.serial.read(data_len)
@@ -371,8 +434,8 @@ class RPLidarProtocol:
                     # Check quality (bit 0 of first byte)
                     quality = byte_data[0] >> 2
                     check_bit = (byte_data[0] >> 1) & 0x01
-                    
-                    if check_bit != 1:
+                    # Accept check_bit 0 or 1 (some A1 firmware uses 0)
+                    if check_bit not in (0, 1):
                         continue  # Invalid measurement
                     
                     # Parse angle and distance
@@ -384,15 +447,12 @@ class RPLidarProtocol:
                     distance_mm = distance_raw
                     
                     # Filter invalid measurements
-                    if distance_mm < 1.0 or distance_mm > 12000.0:
-                        continue
+                    if 1.0 <= distance_mm <= 12000.0:
+                        points.append((angle_deg, distance_mm, quality))
                     
-                    points.append((angle_deg, distance_mm, quality))
-                    
-                    # Detect sweep completion (angle wraps around)
+                    # Detect sweep completion (angle wraps around); yield every rotation
                     if prev_angle is not None and angle_deg < prev_angle:
-                        if points:
-                            yield points
+                        yield points
                         points = []
                     
                     prev_angle = angle_deg
