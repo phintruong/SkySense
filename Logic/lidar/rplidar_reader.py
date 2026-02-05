@@ -15,6 +15,7 @@ import sys
 import signal
 import logging
 import time
+import platform
 from typing import List, Tuple, Optional, Generator
 from pyrplidar import PyRPlidar
 
@@ -25,8 +26,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configuration constants
-DEFAULT_PORT = '/dev/ttyUSB0'
+# Configuration constants - auto-detect platform
+# Windows: 'COM3', 'COM4', etc. | Linux/Pi: '/dev/ttyUSB0'
+DEFAULT_PORT = 'COM3' if platform.system() == 'Windows' else '/dev/ttyUSB0'
 DEFAULT_BAUDRATE = 460800  # Higher baudrate for better performance
 DEFAULT_TIMEOUT = 3.0
 DEFAULT_MOTOR_PWM = 500  # Motor PWM value (0-1023)

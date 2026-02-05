@@ -10,7 +10,7 @@ import math
 import pygame
 import logging
 from typing import List, Tuple, Optional
-from hardware import RPLidarReader
+from .rplidar_reader import RPLidarReader
 
 # Configure logging
 logging.basicConfig(
@@ -209,11 +209,13 @@ def visualize_lidar(port: str = '/dev/ttyUSB0', title: str = "LiDAR Radar System
 def main():
     """Standalone execution of LiDAR visualization."""
     import sys
-    
-    port = '/dev/ttyUSB0'
+    import platform
+
+    # Auto-detect platform: Windows = COM3, Linux/Pi = /dev/ttyUSB0
+    port = 'COM3' if platform.system() == 'Windows' else '/dev/ttyUSB0'
     if len(sys.argv) > 1:
         port = sys.argv[1]
-    
+
     visualize_lidar(port=port)
 
 
