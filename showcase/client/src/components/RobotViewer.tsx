@@ -8,7 +8,7 @@ import { useUISounds } from '../hooks/useUISounds';
 import { getGroupForMeshId, getGroupMeshIds, resolveSceneNameToCanonicalId } from '../config/robotParts';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 
-const MODEL_PATH = '/site_model/site_model.gltf';
+const MODEL_PATH = '/site_models/site_models.gltf';
 
 const HIGHLIGHT_COLOR = new THREE.Color('#c026d3');
 const LERP_SPEED = 0.5;
@@ -424,24 +424,22 @@ function LoadedModel() {
       currentOffset.lerp(targetOffset, LERP_SPEED);
       mesh.position.copy(origPos).add(currentOffset);
 
-      // --- Propeller spin: each arm (1 motor + 2 blades) spins as one unit, horizontally (Y). Spin only while any move key is pressed (W/S/A/D/Space/Ctrl); stop instantly when all released. ---
-      // Arm numbering (from model/config): Arm 1 = crude motor-1, Motor Arm 1-1, Propeller Blade-1,2. Arm 2 = motor-2, Arm 1-2, Blade-3,4. Arm 3 = motor-3, Arm 1-3, Blade-5,6. Arm 4 = motor-4, Arm 1-4, Blade-7,8.
+      // --- Propeller spin: propellers are a single entity, spin horizontally (Y) when moving ---
       const keys = keysRef.current;
       const isMoving = keys.forward || keys.back || keys.flyUp || keys.flyDown || keys.left || keys.right;
       if (isMoving) {
-        let armIndex: number;
-        if (basePartIdForMesh.includes('crude motor')) {
-          armIndex = parseInt(basePartIdForMesh.match(/\d+/)?.[0] || '1');
-        } else if (basePartIdForMesh.includes('Propeller Blade')) {
-          const bladeIndex = parseInt(basePartIdForMesh.match(/\d+/)?.[0] || '1');
-          armIndex = Math.ceil(bladeIndex / 2); // Blade-1,2 -> arm 1; Blade-3,4 -> arm 2; etc.
-        } else {
-          armIndex = 0;
-        }
-        if (armIndex >= 1 && armIndex <= 4) {
-          // Diagonal pairs same direction (1&4, 2&3) so the two on the right (2 and 4) spin opposite and look correct
-          const direction = (armIndex === 2 || armIndex === 3) ? 1 : -1;
+        // Spin motors and the unified propellers mesh
+        const isMotor = basePartIdForMesh.includes('crude motor');
+        const isPropellers = basePartIdForMesh === 'Propellers' || basePartIdForMesh.toLowerCase().includes('propeller');
+
+        if (isMotor) {
+          const motorIndex = parseInt(basePartIdForMesh.match(/\d+/)?.[0] || '1');
+          // Diagonal pairs spin opposite directions (1&4 vs 2&3)
+          const direction = (motorIndex === 2 || motorIndex === 3) ? 1 : -1;
           mesh.rotation.y += PROPELLER_SPIN_SPEED * delta * direction;
+        } else if (isPropellers) {
+          // Single propellers entity - rotate as one unit
+          mesh.rotation.y += PROPELLER_SPIN_SPEED * delta;
         }
       }
     }
