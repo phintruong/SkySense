@@ -1,11 +1,17 @@
 """
 Main Program - Real Hardware Mode
 Runs obstacle detection using actual RPLIDAR sensor data.
+
+Usage:
+    python main.py                    # Use USB mode (default)
+    python main.py --gpio             # Use GPIO mode (direct pins)
+    python main.py --gpio --port /dev/serial0  # Custom port
 """
 
 import time
 import signal
 import sys
+import argparse
 from lidar import RPLidarReader
 from core import process_scan, DANGER_RADIUS, FORWARD_CONE_HALF_ANGLE
 
@@ -58,27 +64,90 @@ def print_scan_summary(scan_data, action, obstacle_info):
 def main():
     """Main loop with real RPLIDAR hardware."""
     global _lidar
-    
+
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description='SkySense Obstacle Detection - RPLIDAR A1',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__
+    )
+    parser.add_argument(
+        '--gpio',
+        action='store_true',
+        help='Use GPIO motor control (direct pin connections) instead of USB adapter'
+    )
+    parser.add_argument(
+        '--port',
+        type=str,
+        default=None,
+        help='Serial port (default: /dev/ttyUSB0 for USB, /dev/serial0 for GPIO)'
+    )
+    parser.add_argument(
+        '--motor-duty',
+        type=int,
+        default=50,
+        help='Motor duty cycle for GPIO mode (0-100, default: 50)'
+    )
+    args = parser.parse_args()
+
     signal.signal(signal.SIGINT, signal_handler)
-    
+
     print("SkySense Obstacle Detection")
     print("=" * 50)
     print(f"Danger radius: {DANGER_RADIUS}m")
     print(f"Forward cone: +/-{FORWARD_CONE_HALF_ANGLE}deg")
     print("Using: RPLIDAR A1 Hardware")
+
+    # Determine port and mode
+    if args.gpio:
+        port = args.port or '/dev/serial0'
+        mode = "GPIO (Direct Pins)"
+        print(f"Mode: {mode}")
+        print(f"Port: {port}")
+        print(f"Motor: GPIO PWM @ {args.motor_duty}% duty")
+    else:
+        port = args.port or '/dev/ttyUSB0'  # Will auto-detect COM3 on Windows
+        mode = "USB Adapter"
+        print(f"Mode: {mode}")
+        print(f"Port: {port}")
+        print("Motor: Serial Control")
+
     print("Press Ctrl+C to stop\n")
-    
-    # Initialize LiDAR
-    lidar = RPLidarReader()
+
+    # Initialize LiDAR with appropriate settings
+    lidar = RPLidarReader(
+        port=port,
+        use_gpio_motor=args.gpio,
+        motor_duty_cycle=args.motor_duty
+    )
     _lidar = lidar
     
     if not lidar.connect():
         print("ERROR: Failed to connect to RPLIDAR")
-        print("Check USB connection and try again")
+        if args.gpio:
+            print("Check:")
+            print("  - UART enabled in /boot/config.txt")
+            print("  - TX/RX wires connected (not swapped)")
+            print("  - /dev/serial0 exists and is accessible")
+            print("  - Permissions: sudo usermod -a -G dialout,gpio $USER")
+        else:
+            print("Check:")
+            print("  - USB cable is connected")
+            print("  - Device is detected (ls /dev/ttyUSB* or check Device Manager)")
+            print("  - Permissions: sudo usermod -a -G dialout $USER")
         sys.exit(1)
-    
+
     if not lidar.start():
         print("ERROR: Failed to start RPLIDAR motor")
+        if args.gpio:
+            print("Check:")
+            print("  - MOTOCTL wire connected to GPIO12 (Pin 32)")
+            print("  - 5V and GND properly connected")
+            print("  - Try adjusting duty cycle: --motor-duty 70")
+        else:
+            print("Check:")
+            print("  - Motor power is supplied via USB")
+            print("  - LiDAR is receiving sufficient power")
         lidar.disconnect()
         sys.exit(1)
     

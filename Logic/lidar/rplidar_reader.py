@@ -19,6 +19,13 @@ import platform
 from typing import List, Tuple, Optional, Generator
 from pyrplidar import PyRPlidar
 
+# GPIO imports for direct pin motor control (Raspberry Pi only)
+try:
+    import RPi.GPIO as GPIO
+    GPIO_AVAILABLE = True
+except (ImportError, RuntimeError):
+    GPIO_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -27,13 +34,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration constants - auto-detect platform
-# Windows: 'COM3', 'COM4', etc. | Linux/Pi: '/dev/ttyUSB0'
+# Windows: 'COM3', 'COM4', etc. | Linux/Pi: '/dev/ttyUSB0' for USB, '/dev/serial0' for GPIO UART
 DEFAULT_PORT = 'COM3' if platform.system() == 'Windows' else '/dev/ttyUSB0'
 DEFAULT_BAUDRATE = 460800  # Higher baudrate for better performance
 DEFAULT_TIMEOUT = 3.0
 DEFAULT_MOTOR_PWM = 500  # Motor PWM value (0-1023)
 MIN_DISTANCE_MM = 50  # Minimum valid distance in millimeters (5 cm)
 MAX_DISTANCE_MM = 3000  # Maximum valid distance in millimeters (300 cm)
+
+# GPIO Motor Control (for direct pin connections on Raspberry Pi)
+MOTOR_PWM_PIN = 12  # GPIO12 (Physical pin 32) - Hardware PWM0
+MOTOR_PWM_FREQ = 25000  # 25 kHz PWM frequency for motor control
+MOTOR_DUTY_CYCLE = 50  # 50% duty cycle (adjust 0-100 for motor speed)
 
 
 class RPLidarReader:
@@ -45,22 +57,36 @@ class RPLidarReader:
     """
     
     def __init__(self, port: str = DEFAULT_PORT, baudrate: int = DEFAULT_BAUDRATE,
-                 motor_pwm: int = DEFAULT_MOTOR_PWM):
+                 motor_pwm: int = DEFAULT_MOTOR_PWM, use_gpio_motor: bool = False,
+                 motor_pin: int = MOTOR_PWM_PIN, motor_duty_cycle: int = MOTOR_DUTY_CYCLE):
         """
         Initialize RPLIDAR reader.
-        
+
         Args:
-            port: Serial port path (e.g., '/dev/ttyUSB0' on Linux, 'COM3' on Windows)
+            port: Serial port path (e.g., '/dev/ttyUSB0' for USB, '/dev/serial0' for direct UART)
             baudrate: Serial communication baud rate (default: 460800)
-            motor_pwm: Motor PWM value 0-1023 (default: 500)
+            motor_pwm: Motor PWM value 0-1023 (default: 500) - used when use_gpio_motor=False
+            use_gpio_motor: If True, control motor via GPIO pin instead of serial command
+            motor_pin: GPIO pin number for motor control (BCM numbering, default: 12)
+            motor_duty_cycle: PWM duty cycle 0-100% for GPIO motor control (default: 50)
         """
         self.port = port
         self.baudrate = baudrate
         self.motor_pwm = motor_pwm
+        self.use_gpio_motor = use_gpio_motor
+        self.motor_pin = motor_pin
+        self.motor_duty_cycle = motor_duty_cycle
         self.lidar: Optional[PyRPlidar] = None
         self._running = False
         self._scan_generator_func = None
         self._scan_generator: Optional[Generator] = None
+        self._gpio_pwm = None  # GPIO PWM instance
+
+        # Validate GPIO availability if needed
+        if self.use_gpio_motor and not GPIO_AVAILABLE:
+            logger.warning("GPIO motor control requested but RPi.GPIO not available")
+            logger.warning("Falling back to serial motor control")
+            self.use_gpio_motor = False
         
     def connect(self) -> bool:
         """
@@ -90,27 +116,44 @@ class RPLidarReader:
     def start(self) -> bool:
         """
         Start the RPLIDAR motor and begin scanning.
-        
+
         Returns:
             True if motor started successfully, False otherwise
         """
         if not self.lidar:
             logger.error("Cannot start: RPLIDAR not connected")
             return False
-        
+
         try:
-            # Set motor PWM and wait for stabilization
-            self.lidar.set_motor_pwm(self.motor_pwm)
-            time.sleep(2)  # Allow motor to stabilize
-            
+            # Motor control: GPIO vs Serial
+            if self.use_gpio_motor:
+                # Initialize GPIO motor control
+                logger.info(f"Initializing GPIO motor control on pin {self.motor_pin}")
+                GPIO.setmode(GPIO.BCM)
+                GPIO.setup(self.motor_pin, GPIO.OUT)
+                self._gpio_pwm = GPIO.PWM(self.motor_pin, MOTOR_PWM_FREQ)
+                self._gpio_pwm.start(self.motor_duty_cycle)
+                logger.info(f"GPIO PWM started: {MOTOR_PWM_FREQ}Hz, {self.motor_duty_cycle}% duty cycle")
+                time.sleep(2)  # Allow motor to stabilize
+            else:
+                # Use serial motor control (USB adapter)
+                self.lidar.set_motor_pwm(self.motor_pwm)
+                logger.info(f"Serial motor PWM set to {self.motor_pwm}")
+                time.sleep(2)  # Allow motor to stabilize
+
             # Start force scan (returns a generator function)
             self._scan_generator_func = self.lidar.force_scan()
             self._scan_generator = None
             self._running = True
-            logger.info(f"RPLIDAR motor started (PWM: {self.motor_pwm}), scanning initiated")
+            logger.info("RPLIDAR scanning initiated")
             return True
         except Exception as e:
             logger.error(f"Failed to start motor: {type(e).__name__}: {e}")
+            # Cleanup GPIO if it was initialized
+            if self._gpio_pwm:
+                self._gpio_pwm.stop()
+                GPIO.cleanup(self.motor_pin)
+                self._gpio_pwm = None
             return False
     
     def stop(self) -> None:
@@ -118,7 +161,17 @@ class RPLidarReader:
         if self.lidar and self._running:
             try:
                 self.lidar.stop()
-                self.lidar.set_motor_pwm(0)
+
+                # Stop motor control based on mode
+                if self.use_gpio_motor and self._gpio_pwm:
+                    self._gpio_pwm.stop()
+                    GPIO.cleanup(self.motor_pin)
+                    self._gpio_pwm = None
+                    logger.info("GPIO motor PWM stopped")
+                else:
+                    self.lidar.set_motor_pwm(0)
+                    logger.info("Serial motor PWM stopped")
+
                 self._running = False
                 self._scan_generator = None
                 self._scan_generator_func = None
