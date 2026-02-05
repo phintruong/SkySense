@@ -1,5 +1,6 @@
 gpiozero>=1.6.0
 RPi.GPIO>=0.7.0          # For direct GPIO motor control (RPLIDAR via pins)
+rplidar>=0.9.0          # A1-compatible driver (preferred); use with RPLIDAR A1
 pyrplidar>=1.0.0
 pyserial>=3.5
 pygame>=2.0.0

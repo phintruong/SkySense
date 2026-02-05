@@ -12,8 +12,15 @@ import time
 import signal
 import sys
 import argparse
+import platform
 from lidar import RPLidarReader
 from core import process_scan, DANGER_RADIUS, FORWARD_CONE_HALF_ANGLE
+
+try:
+    import serial.tools.list_ports
+    LIST_PORTS_AVAILABLE = True
+except ImportError:
+    LIST_PORTS_AVAILABLE = False
 
 
 # Global reference for signal handler
@@ -80,7 +87,7 @@ def main():
         '--port',
         type=str,
         default=None,
-        help='Serial port (default: /dev/ttyUSB0 for USB, /dev/serial0 for GPIO)'
+        help='Serial port (default: COM3 on Windows, /dev/ttyUSB0 on Linux for USB; /dev/serial0 for GPIO)'
     )
     parser.add_argument(
         '--motor-duty',
@@ -88,7 +95,27 @@ def main():
         default=50,
         help='Motor duty cycle for GPIO mode (0-100, default: 50)'
     )
+    parser.add_argument(
+        '--list-ports',
+        action='store_true',
+        help='List available serial/COM ports and exit (useful to find LiDAR port on Windows)'
+    )
     args = parser.parse_args()
+
+    if args.list_ports:
+        if LIST_PORTS_AVAILABLE:
+            ports = list(serial.tools.list_ports.comports())
+            if not ports:
+                print("No serial ports found. Is the LiDAR plugged in via USB?")
+            else:
+                print("Available serial ports:")
+                for p in ports:
+                    print(f"  {p.device}  - {p.description}")
+                if platform.system() == 'Windows':
+                    print("\nUse: python main.py --port COMx  (e.g. COM3, COM4)")
+        else:
+            print("Install pyserial to list ports: pip install pyserial")
+        sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
 
@@ -98,7 +125,8 @@ def main():
     print(f"Forward cone: +/-{FORWARD_CONE_HALF_ANGLE}deg")
     print("Using: RPLIDAR A1 Hardware")
 
-    # Determine port and mode
+    # Determine port and mode (Windows uses COM3, COM4, etc.; Linux uses /dev/ttyUSB0)
+    default_usb_port = 'COM3' if platform.system() == 'Windows' else '/dev/ttyUSB0'
     if args.gpio:
         port = args.port or '/dev/serial0'
         mode = "GPIO (Direct Pins)"
@@ -106,7 +134,7 @@ def main():
         print(f"Port: {port}")
         print(f"Motor: GPIO PWM @ {args.motor_duty}% duty")
     else:
-        port = args.port or '/dev/ttyUSB0'  # Will auto-detect COM3 on Windows
+        port = args.port or default_usb_port
         mode = "USB Adapter"
         print(f"Mode: {mode}")
         print(f"Port: {port}")
@@ -133,8 +161,12 @@ def main():
         else:
             print("Check:")
             print("  - USB cable is connected")
-            print("  - Device is detected (ls /dev/ttyUSB* or check Device Manager)")
-            print("  - Permissions: sudo usermod -a -G dialout $USER")
+            if platform.system() == 'Windows':
+                print("  - Device Manager: Ports (COM & LPT) for COM port (e.g. COM3, COM4)")
+                print("  - Try: python main.py --port COM4 (if LiDAR is on a different COM port)")
+            else:
+                print("  - Device is detected (ls /dev/ttyUSB* or check Device Manager)")
+                print("  - Permissions: sudo usermod -a -G dialout $USER")
         sys.exit(1)
 
     if not lidar.start():

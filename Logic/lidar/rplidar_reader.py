@@ -2,13 +2,14 @@
 """
 RPLIDAR A1 Hardware Interface Module
 
-Provides a professional interface for reading scan data from RPLIDAR A1 sensors
-using the PyRPlidar library. Integrates with the obstacle detection logic module
-and supports data export for post-processing analysis.
+Provides a professional interface for reading scan data from RPLIDAR A1 sensors.
+Uses the 'rplidar' package (Skoltech/SkRobo) when available for reliable A1 support;
+falls back to PyRPlidar for other models. Integrates with the obstacle detection
+logic module and supports data export for post-processing analysis.
 
 References:
-- PyLidar: https://www.pylidar.org/en/latest/ (for post-processing LiDAR data files)
-- PyRPlidar: https://github.com/SkoltechRobotics/pyrplidar
+- rplidar (A1-compatible): pip install rplidar
+- PyRPlidar: https://github.com/SkoltechRobotics/pyrplidar (A2+ protocol)
 """
 
 import sys
@@ -16,7 +17,17 @@ import signal
 import logging
 import time
 import platform
-from typing import List, Tuple, Optional, Generator
+from typing import List, Tuple, Optional, Generator, Any
+
+# Prefer 'rplidar' package (Skoltech/SkRobo) - implements A1 protocol correctly.
+# PyRPlidar expects a 7-byte descriptor response that A1 doesn't send -> IndexError.
+try:
+    from rplidar import RPLidar as SkRPLidar
+    SK_RPLIDAR_AVAILABLE = True
+except ImportError:
+    SkRPLidar = None
+    SK_RPLIDAR_AVAILABLE = False
+
 from pyrplidar import PyRPlidar
 
 # GPIO imports for direct pin motor control (Raspberry Pi only)
@@ -36,8 +47,8 @@ logger = logging.getLogger(__name__)
 # Configuration constants - auto-detect platform
 # Windows: 'COM3', 'COM4', etc. | Linux/Pi: '/dev/ttyUSB0' for USB, '/dev/serial0' for GPIO UART
 DEFAULT_PORT = 'COM3' if platform.system() == 'Windows' else '/dev/ttyUSB0'
-DEFAULT_BAUDRATE = 460800  # Higher baudrate for better performance
-DEFAULT_TIMEOUT = 3.0
+DEFAULT_BAUDRATE = 115200  # RPLidar A1 default; 460800 can cause protocol/parsing errors
+DEFAULT_TIMEOUT = 6.0  # A1 can be slow to respond; short timeout -> partial read -> IndexError
 DEFAULT_MOTOR_PWM = 500  # Motor PWM value (0-1023)
 MIN_DISTANCE_MM = 50  # Minimum valid distance in millimeters (5 cm)
 MAX_DISTANCE_MM = 3000  # Maximum valid distance in millimeters (300 cm)
@@ -46,6 +57,15 @@ MAX_DISTANCE_MM = 3000  # Maximum valid distance in millimeters (300 cm)
 MOTOR_PWM_PIN = 12  # GPIO12 (Physical pin 32) - Hardware PWM0
 MOTOR_PWM_FREQ = 25000  # 25 kHz PWM frequency for motor control
 MOTOR_DUTY_CYCLE = 50  # 50% duty cycle (adjust 0-100 for motor speed)
+
+# Drone frame: sensor 0° = back of drone; 180 offset so 0° = front, then mirror L/R
+ANGLE_OFFSET_DEG = 180
+
+
+def _drone_angle(angle_deg: float) -> float:
+    """Convert sensor angle (0° = back) to drone frame (0° = front), mirrored left/right."""
+    # (180 - x) % 360 = 180° offset (0=front) + mirror (left<->right)
+    return (ANGLE_OFFSET_DEG - angle_deg) % 360.0
 
 
 class RPLidarReader:
@@ -64,7 +84,7 @@ class RPLidarReader:
 
         Args:
             port: Serial port path (e.g., '/dev/ttyUSB0' for USB, '/dev/serial0' for direct UART)
-            baudrate: Serial communication baud rate (default: 460800)
+            baudrate: Serial communication baud rate (default: 115200 for RPLidar A1)
             motor_pwm: Motor PWM value 0-1023 (default: 500) - used when use_gpio_motor=False
             use_gpio_motor: If True, control motor via GPIO pin instead of serial command
             motor_pin: GPIO pin number for motor control (BCM numbering, default: 12)
@@ -76,7 +96,8 @@ class RPLidarReader:
         self.use_gpio_motor = use_gpio_motor
         self.motor_pin = motor_pin
         self.motor_duty_cycle = motor_duty_cycle
-        self.lidar: Optional[PyRPlidar] = None
+        self.lidar: Any = None  # PyRPlidar or SkRPLidar
+        self._use_sk_rplidar = False  # True when using 'rplidar' package (A1-compatible)
         self._running = False
         self._scan_generator_func = None
         self._scan_generator: Optional[Generator] = None
@@ -91,14 +112,33 @@ class RPLidarReader:
     def connect(self) -> bool:
         """
         Establish connection to RPLIDAR sensor.
+        Prefers 'rplidar' package when available (correct A1 protocol); else PyRPlidar.
         
         Returns:
             True if connection successful, False otherwise
         """
+        # Prefer SkRPLidar for A1 (avoids 7-byte descriptor IndexError with pyrplidar)
+        if not self.use_gpio_motor and SK_RPLIDAR_AVAILABLE:
+            try:
+                logger.info(f"Connecting to RPLIDAR on {self.port} (rplidar backend, A1-compatible)...")
+                self.lidar = SkRPLidar(
+                    self.port,
+                    baudrate=self.baudrate,
+                    timeout=max(3, int(DEFAULT_TIMEOUT))
+                )
+                self._use_sk_rplidar = True
+                logger.info("RPLIDAR connection established (rplidar backend)")
+                return True
+            except Exception as e:
+                logger.warning(f"rplidar backend failed: {e}; falling back to PyRPlidar")
+                self._use_sk_rplidar = False
+                self.lidar = None
+
         try:
             logger.info(f"Connecting to RPLIDAR on {self.port} at {self.baudrate} baud...")
             self.lidar = PyRPlidar()
             self.lidar.connect(port=self.port, baudrate=self.baudrate, timeout=DEFAULT_TIMEOUT)
+            self._use_sk_rplidar = False
             logger.info("RPLIDAR connection established")
             return True
         except FileNotFoundError:
@@ -116,6 +156,7 @@ class RPLidarReader:
     def start(self) -> bool:
         """
         Start the RPLIDAR motor and begin scanning.
+        With rplidar backend, motor is already started in connect().
 
         Returns:
             True if motor started successfully, False otherwise
@@ -124,8 +165,14 @@ class RPLidarReader:
             logger.error("Cannot start: RPLIDAR not connected")
             return False
 
+        if self._use_sk_rplidar:
+            self._running = True
+            self._scan_generator_func = True  # marker; iter_scans uses lidar.iter_scans()
+            logger.info("RPLIDAR scanning initiated (rplidar backend)")
+            return True
+
         try:
-            # Motor control: GPIO vs Serial
+            # Motor control: GPIO vs Serial (PyRPlidar backend)
             if self.use_gpio_motor:
                 # Initialize GPIO motor control
                 logger.info(f"Initializing GPIO motor control on pin {self.motor_pin}")
@@ -139,30 +186,49 @@ class RPLidarReader:
                 # Use serial motor control (USB adapter)
                 self.lidar.set_motor_pwm(self.motor_pwm)
                 logger.info(f"Serial motor PWM set to {self.motor_pwm}")
-                time.sleep(2)  # Allow motor to stabilize
+                time.sleep(4)  # A1 needs longer spin-up before responding to scan
 
-            # Start force scan (returns a generator function)
-            self._scan_generator_func = self.lidar.force_scan()
+            # Use standard scan (0x20). Library reads 7-byte descriptor; partial read -> IndexError.
+            # Retry a few times in case A1 is slow to respond.
+            for attempt in range(3):
+                try:
+                    self._scan_generator_func = self.lidar.start_scan()
+                    break
+                except IndexError:
+                    if attempt < 2:
+                        logger.warning("Scan descriptor read failed, retrying in 1.5s...")
+                        time.sleep(1.5)
+                    else:
+                        raise
             self._scan_generator = None
             self._running = True
             logger.info("RPLIDAR scanning initiated")
             return True
         except Exception as e:
             logger.error(f"Failed to start motor: {type(e).__name__}: {e}")
-            # Cleanup GPIO if it was initialized
-            if self._gpio_pwm:
-                self._gpio_pwm.stop()
-                GPIO.cleanup(self.motor_pin)
-                self._gpio_pwm = None
+            # Stop motor so it doesn't keep spinning after disconnect
+            try:
+                if self.use_gpio_motor and self._gpio_pwm:
+                    self._gpio_pwm.stop()
+                    GPIO.cleanup(self.motor_pin)
+                    self._gpio_pwm = None
+                else:
+                    self.lidar.set_motor_pwm(0)
+            except Exception:
+                pass
             return False
     
     def stop(self) -> None:
         """Stop the RPLIDAR motor."""
-        if self.lidar and self._running:
-            try:
+        if not self.lidar or not self._running:
+            return
+        try:
+            if self._use_sk_rplidar:
                 self.lidar.stop()
-
-                # Stop motor control based on mode
+                self.lidar.stop_motor()
+                logger.info("RPLIDAR motor stopped (rplidar backend)")
+            else:
+                self.lidar.stop()
                 if self.use_gpio_motor and self._gpio_pwm:
                     self._gpio_pwm.stop()
                     GPIO.cleanup(self.motor_pin)
@@ -171,13 +237,12 @@ class RPLidarReader:
                 else:
                     self.lidar.set_motor_pwm(0)
                     logger.info("Serial motor PWM stopped")
-
-                self._running = False
-                self._scan_generator = None
-                self._scan_generator_func = None
-                logger.info("RPLIDAR motor stopped")
-            except Exception as e:
-                logger.warning(f"Error stopping motor: {e}")
+            self._running = False
+            self._scan_generator = None
+            self._scan_generator_func = None
+            logger.info("RPLIDAR motor stopped")
+        except Exception as e:
+            logger.warning(f"Error stopping motor: {e}")
     
     def disconnect(self) -> None:
         """Disconnect from RPLIDAR sensor."""
@@ -203,8 +268,23 @@ class RPLidarReader:
             - Distances are in meters
             - Invalid measurements (out of range) are filtered
         """
-        if not self.lidar or not self._running or not self._scan_generator_func:
+        if not self.lidar or not self._running:
             logger.warning("Cannot get scan: RPLIDAR not running")
+            return None
+
+        if self._use_sk_rplidar:
+            try:
+                scan = next(self.lidar.iter_scans())
+                return [
+                    (_drone_angle(angle_deg), dist_mm / 1000.0)
+                    for _q, angle_deg, dist_mm in scan
+                    if MIN_DISTANCE_MM <= dist_mm <= MAX_DISTANCE_MM
+                ] or None
+            except (StopIteration, Exception) as e:
+                logger.warning(f"get_scan failed: {e}")
+                return None
+        
+        if not self._scan_generator_func:
             return None
         
         try:
@@ -212,7 +292,7 @@ class RPLidarReader:
             prev_angle = None
             points_collected = False
             
-            # Get generator if not already created
+            # Get generator if not already created (PyRPlidar backend)
             if self._scan_generator is None:
                 self._scan_generator = self._scan_generator_func()
             
@@ -222,8 +302,7 @@ class RPLidarReader:
                 if MIN_DISTANCE_MM <= scan.distance <= MAX_DISTANCE_MM:
                     # Convert distance from millimeters to meters
                     distance_m = scan.distance / 1000.0
-                    angle_deg = scan.angle
-                    scan_data.append((angle_deg, distance_m))
+                    scan_data.append((_drone_angle(scan.angle), distance_m))
                     points_collected = True
                 
                 # Detect sweep completion (angle wraps around)
@@ -249,12 +328,31 @@ class RPLidarReader:
             List of tuples [(angle_degrees, distance_meters), ...]
             Format compatible with logic.process_scan()
         """
-        if not self.lidar or not self._running or not self._scan_generator_func:
+        if not self.lidar or not self._running:
+            logger.error("Cannot iterate scans: RPLIDAR not running")
+            return
+
+        if self._use_sk_rplidar:
+            # rplidar package: iter_scans() yields list of (quality, angle_deg, distance_mm)
+            try:
+                for scan in self.lidar.iter_scans():
+                    points = []
+                    for _quality, angle_deg, dist_mm in scan:
+                        if MIN_DISTANCE_MM <= dist_mm <= MAX_DISTANCE_MM:
+                            points.append((_drone_angle(angle_deg), dist_mm / 1000.0))
+                    if points:
+                        yield points
+            except Exception as e:
+                logger.error(f"Error in scan iteration: {type(e).__name__}: {e}")
+                raise
+            return
+
+        if not self._scan_generator_func:
             logger.error("Cannot iterate scans: RPLIDAR not running")
             return
         
         try:
-            # Get generator if not already created
+            # Get generator if not already created (PyRPlidar backend)
             if self._scan_generator is None:
                 self._scan_generator = self._scan_generator_func()
             
@@ -265,8 +363,7 @@ class RPLidarReader:
                 # Collect valid measurements
                 if MIN_DISTANCE_MM <= scan.distance <= MAX_DISTANCE_MM:
                     distance_m = scan.distance / 1000.0
-                    angle_deg = scan.angle
-                    points.append((angle_deg, distance_m))
+                    points.append((_drone_angle(scan.angle), distance_m))
                 
                 # Detect sweep completion (angle wraps around)
                 if prev_angle is not None and scan.angle < prev_angle:
