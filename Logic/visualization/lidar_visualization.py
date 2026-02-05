@@ -9,8 +9,16 @@ Displays distance-based color coding and reference circles for spatial reference
 import math
 import pygame
 import logging
+import sys
+import os
 from typing import List, Tuple, Optional
-from hardware import RPLidarReader
+
+# Add parent directory to path for imports
+_LOGIC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _LOGIC_DIR not in sys.path:
+    sys.path.insert(0, _LOGIC_DIR)
+
+from hardware.rplidar_reader import RPLidarReader
 
 # Configure logging
 logging.basicConfig(
@@ -162,15 +170,17 @@ class LidarVisualizer:
         pygame.quit()
 
 
-def visualize_lidar(port: str = '/dev/ttyUSB0', title: str = "LiDAR Radar System"):
+def visualize_lidar(port: str = '/dev/ttyUSB0', motor_gpio: Optional[int] = None,
+                    title: str = "LiDAR Radar System"):
     """
     Main visualization function for real-time LiDAR display.
-    
+
     Args:
         port: Serial port for RPLIDAR
+        motor_gpio: GPIO pin for motor control (BCM numbering, e.g., 12)
         title: Window title
     """
-    reader = RPLidarReader(port=port)
+    reader = RPLidarReader(port=port, motor_gpio_pin=motor_gpio)
     visualizer = LidarVisualizer(title=title)
     
     try:
@@ -209,12 +219,16 @@ def visualize_lidar(port: str = '/dev/ttyUSB0', title: str = "LiDAR Radar System
 def main():
     """Standalone execution of LiDAR visualization."""
     import sys
-    
+
     port = '/dev/ttyUSB0'
+    motor_gpio = None
+
     if len(sys.argv) > 1:
         port = sys.argv[1]
-    
-    visualize_lidar(port=port)
+    if len(sys.argv) > 2:
+        motor_gpio = int(sys.argv[2])
+
+    visualize_lidar(port=port, motor_gpio=motor_gpio)
 
 
 if __name__ == "__main__":

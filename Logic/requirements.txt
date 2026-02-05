@@ -1,5 +1,5 @@
 gpiozero>=1.6.0
-pyrplidar>=1.0.0
+pyrplidar>=0.1.0
 pyserial>=3.5
 pygame>=2.0.0
 
