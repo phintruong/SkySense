@@ -1,11 +1,10 @@
 """
-Main Simulation Program
-Runs the LiDAR obstacle detection simulation loop.
+Main Program
+Runs the LiDAR obstacle detection loop with real hardware.
 """
 
 import time
-import random
-from simulation import generate_scan, generate_scan_with_pattern
+from hardware import RPLidarReader
 from core import process_scan, DANGER_RADIUS, FORWARD_CONE_HALF_ANGLE
 
 
@@ -27,7 +26,7 @@ def print_scan_summary(scan_data, action, obstacle_info, tilt_angle=0):
     if tilt_angle != 0:
         tilt_direction = "left" if tilt_angle > 0 else "right"
         print(f"[TILT] Drone tilted {abs(tilt_angle):.1f}° {tilt_direction} (forward cone adjusted)")
-    
+
     if obstacle_info:
         print(f"[INFO] {len(obstacle_info)} obstacle(s) in forward cone within danger zone ({DANGER_RADIUS}m):")
         for obs in obstacle_info:
@@ -35,59 +34,50 @@ def print_scan_summary(scan_data, action, obstacle_info, tilt_angle=0):
             distance = obs['distance']
             region = obs['region']
             print(f"       - {distance:.2f}m at {angle}° ({region})")
-        
-        # Find closest obstacle
+
         closest = min(obstacle_info, key=lambda x: x['distance'])
         print(f"[INFO] Closest obstacle: {closest['distance']:.2f}m at {closest['angle']}° ({closest['region']})")
     else:
         print(f"[INFO] Forward path clear - no obstacles within {DANGER_RADIUS}m in forward cone")
-    
+
     print(f"[ACTION] {format_action_message(action)}")
     print("-" * 60)
 
 
 def main():
-    """Main simulation loop."""
-    print("LiDAR Obstacle Detection Simulation")
+    """Main loop using real RPLIDAR hardware."""
+    print("SkySense — LiDAR Obstacle Detection")
     print("=" * 60)
     print(f"Danger radius: {DANGER_RADIUS}m")
     print(f"Forward cone: ±{FORWARD_CONE_HALF_ANGLE}° (analyzing direction of movement)")
-    print("Tilt angle: Random (simulating MPU/IMU data)")
     print("Press Ctrl+C to stop\n")
-    
+
+    lidar = RPLidarReader()
+    lidar.connect()
+
     cycle = 0
-    
+
     try:
-        while True:
+        for scan_data in lidar.iter_scans():
             cycle += 1
             print(f"\n--- Cycle {cycle} ---")
-            
-            # Generate LiDAR scan
-            # Use generate_scan() for random obstacles
-            # Use generate_scan_with_pattern() for predictable test pattern
-            scan_data = generate_scan()
-            # scan_data = generate_scan_with_pattern()  # Uncomment for test pattern
-            
-            # Simulate MPU/IMU tilt angle (roll angle in degrees)
-            # Positive = left roll, negative = right roll
-            # Typical range: -45° to +45° for realistic drone flight
-            tilt_angle = random.uniform(-30, 30)
-            
-            # Process scan and determine action (accounting for tilt)
+
+            # TODO: Replace with real MPU-6050 IMU tilt angle
+            tilt_angle = 0
+
             action, obstacle_info = process_scan(scan_data, tilt_angle=tilt_angle)
-            
-            # Print results
             print_scan_summary(scan_data, action, obstacle_info, tilt_angle)
-            
-            # Small delay between cycles
-            time.sleep(1.0)
-            
+
+            time.sleep(0.1)
+
     except KeyboardInterrupt:
-        print("\n\nSimulation stopped by user")
+        print("\n\nStopped by user")
     except Exception as e:
         print(f"\nError: {e}")
         import traceback
         traceback.print_exc()
+    finally:
+        lidar.disconnect()
 
 
 if __name__ == "__main__":
