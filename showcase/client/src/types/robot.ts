@@ -17,6 +17,16 @@ export interface ApiStatus {
 
 export type Vector3Like = { x: number; y: number; z: number };
 
+export interface LidarScan { angle: number; distance: number; }
+export interface LidarObstacle { angle: number; distance: number; region: string; }
+export interface LidarState {
+  connected: boolean;
+  scan: LidarScan[];
+  action: string;
+  obstacles: LidarObstacle[];
+  tiltAngle: number;
+}
+
 export interface RobotState {
   highlightedParts: string[];
   selectedPart: string | null;
@@ -41,6 +51,8 @@ export interface RobotState {
   isDroneMoving: boolean;
   /** True when the parts panel (part mover) is open. */
   partsPanelOpen: boolean;
+  /** Live LiDAR data from backend. */
+  lidar: LidarState;
 }
 
 export interface RobotActions {
@@ -63,4 +75,6 @@ export interface RobotActions {
   setDroneSpeed: (speed: number) => void;
   setDroneMoving: (moving: boolean) => void;
   setPartsPanelOpen: (open: boolean) => void;
+  setLidarConnected: (connected: boolean) => void;
+  setLidarData: (data: { scan: LidarScan[]; action: string; obstacles: LidarObstacle[]; tiltAngle: number }) => void;
 }

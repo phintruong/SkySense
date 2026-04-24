@@ -1,6 +1,6 @@
-/** Global state: highlights, selection, parts, camera, sound settings. */
+/** Global state: highlights, selection, parts, camera, sound, lidar settings. */
 import { create } from 'zustand';
-import type { RobotState, RobotActions, RobotPart, ApiStatus } from '../types/robot';
+import type { RobotState, RobotActions, RobotPart, ApiStatus, LidarScan, LidarObstacle } from '../types/robot';
 
 export const useRobotStore = create<RobotState & RobotActions>((set) => ({
   highlightedParts: [],
@@ -24,6 +24,14 @@ export const useRobotStore = create<RobotState & RobotActions>((set) => ({
   droneSpeed: 0,
   isDroneMoving: false,
   partsPanelOpen: false,
+
+  lidar: {
+    connected: false,
+    scan: [],
+    action: '',
+    obstacles: [],
+    tiltAngle: 0,
+  },
 
   highlightParts: (partIds: string[]) => set({ highlightedParts: partIds, error: null }),
   clearHighlights: () => set({ highlightedParts: [], selectedPart: null }),
@@ -51,4 +59,10 @@ export const useRobotStore = create<RobotState & RobotActions>((set) => ({
   // Sound settings actions
   setSoundEnabled: (enabled: boolean) => set({ soundEnabled: enabled }),
   setSoundVolume: (volume: number) => set({ soundVolume: volume }),
+
+  // LiDAR actions
+  setLidarConnected: (connected: boolean) =>
+    set((state) => ({ lidar: { ...state.lidar, connected } })),
+  setLidarData: (data: { scan: LidarScan[]; action: string; obstacles: LidarObstacle[]; tiltAngle: number }) =>
+    set((state) => ({ lidar: { ...state.lidar, ...data } })),
 }));
