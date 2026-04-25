@@ -1,24 +1,24 @@
-## Task 1.2a: Quaternion Operations
+## Task 2.2a: PID Controller
 - status: DONE
 - blocker: none
-- notes: Implemented scalar-first Hamilton quaternion operations with identity fallback for zero/invalid normalization and inverse inputs. Vector rotation normalizes input quaternions before applying the efficient cross-product form.
+- notes: Implemented proportional, integral, derivative terms with first-call derivative suppression, integral anti-windup, output clamping, and reset.
 
-## Task 1.2b: Rotation Conversions
+## Task 2.2b: Attitude Controller
 - status: DONE
 - blocker: none
-- notes: Implemented NED 3-2-1 Euler conversions, body-to-NED rotation matrices, canonical matrix-to-quaternion conversion, and body/NED vector transforms.
+- notes: Implemented independent roll, pitch, and yaw PIDs. Yaw error uses atan2(sin(error), cos(error)) wrapping and lower yaw gains.
 
-## Task 1.2c: Module Init + Exports
+## Task 2.2c: Position Controller
 - status: DONE
 - blocker: none
-- notes: Exported quaternion and rotation public functions from src.math_utils.
+- notes: Implemented NED position error rotation into body frame using current yaw, tilt-limited roll/pitch commands, altitude thrust adjustment around hover thrust, and total thrust clamping.
 
-## Task 1.2d: Quaternion Tests
+## Task 2.2d: Motor Mixer
 - status: DONE
 - blocker: none
-- notes: Added 13 quaternion tests covering identity, axis rotations, associativity, normalization, inverse behavior, and edge cases. `pytest tests/test_quaternion.py -v` passes.
+- notes: Implemented quad-X mixer signs matching the DroneModel torque equations. Motor outputs clamp to DroneParams min/max thrust.
 
-## Task 1.2e: Rotation Tests
+## Task 2.2e: Module Init + Tests
 - status: DONE
 - blocker: none
-- notes: Added 12 rotation tests covering Euler round trips, gimbal lock, matrix round trips, matrix orthogonality, vector transforms, and NED gravity behavior. `pytest tests/test_rotations.py -v` passes.
+- notes: Exported PIDController, AttitudeController, PositionController, and MotorMixer from src.control. `pytest tests/test_pid.py -v` and `pytest tests/test_motor_mixer.py -v` pass.

@@ -1,19 +1,19 @@
-## Task 1.1a: Directory Tree
+## Task 2.1a: Drone Dynamics Model
 - status: DONE
 - blocker: none
-- notes: Created `src/` package directories (`config`, `simulation`, `sensors`, `navigation`, `control`, `telemetry`, `server`, `math_utils`), plus `tests/`, `legacy/`, and `demos/output/`. Added `__init__.py` files for owned `src/` subpackages and `tests/`.
+- notes: Implemented DroneState and DroneModel with NED gravity, body-to-NED thrust, drag, external force injection, ground constraint, quad-X torque computation, Euler rigid-body angular dynamics, and quaternion integration. Hover sanity check with all motors at hover_thrust_per_motor keeps velocity at zero.
 
-## Task 1.1b: Move Existing Files
+## Task 2.1b: Motor Model
 - status: DONE
 - blocker: none
-- notes: Copied `Logic/core/logic.py` to `src/navigation/obstacle_detector.py`, `Logic/hardware/rplidar_reader.py` to `src/sensors/lidar.py`, and `Logic/hardware/hc_sr04_distance.py` to `src/sensors/ultrasonic.py`. Moved `Logic/rplidar_ros2/` to `legacy/rplidar_ros2/`. Deleted duplicate `Logic/rplidar_reader.py`. Root `nul` file not present.
+- notes: Implemented first-order motor lag with thrust clamping to DroneParams min/max. Step response converges to commanded thrust.
 
-## Task 1.1c: Config System
+## Task 2.1c: Environment
 - status: DONE
 - blocker: none
-- notes: Added `DroneParams` and `SimParams` dataclasses with requested defaults/comments and exports via `src/config/__init__.py`.
+- notes: Implemented constant wind, temporary disturbance injection, combined external force output, gust timer expiration, and reset.
 
-## Task 1.1d: Requirements + Test Scaffold
+## Task 2.1d: Module Init
 - status: DONE
 - blocker: none
-- notes: Added root `requirements.txt` with required dependencies and `tests/conftest.py` fixtures for default `DroneParams()` and `SimParams()`.
+- notes: Exported DroneModel, DroneState, MotorModel, and Environment from src.simulation.
