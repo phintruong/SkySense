@@ -124,7 +124,7 @@ Everything downstream depends on this wave. Project restructure, config system, 
 ### Task 1.1: Project Restructure + Config System
 - **Agent:** Agent 1
 - **Tool:** Claude
-- **Status:** NOT_STARTED
+- **Status:** DONE
 - **Description:**
   1. Create the full `src/` directory tree (all `__init__.py` files)
   2. Move existing files:
@@ -161,7 +161,7 @@ Everything downstream depends on this wave. Project restructure, config system, 
 ### Task 1.2: Math Utilities + Pytest Setup
 - **Agent:** Agent 2
 - **Tool:** Codex
-- **Status:** NOT_STARTED
+- **Status:** DONE
 - **Description:**
   1. Create `src/math_utils/quaternion.py`:
      - `quat_multiply(q1, q2) -> q`: Hamilton product. q = [qw, qx, qy, qz].
