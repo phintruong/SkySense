@@ -4,7 +4,7 @@
 A real drone GNC (Guidance, Navigation, Control) flight software stack. Started as a LiDAR obstacle detection system, now being transformed into a full flight control system with physics simulation, state estimation, and control.
 
 ## Ground Truth
-**`.orchestrator/plan.md` is the master plan.** All design decisions, architecture, conventions, wave progress, and task assignments are documented there. Read it first in any new session.
+**`AGENTS.md` is the current Codex context summary.** **`.orchestrator/plan.md` is the historical master plan.** Read both in any new session; if older plan/status notes conflict with the resolved bug note or current tests, trust `AGENTS.md` and `.orchestrator/bugs/closed_loop_divergence.md`.
 
 ## Architecture Conventions (CRITICAL)
 - **NED coordinate system**: X=North, Y=East, Z=Down. Gravity = [0, 0, +9.81]. Altitude 2m = z=-2.0.
@@ -56,11 +56,11 @@ The project is built in waves using `.orchestrator/`. Each wave has instruction 
 ### Wave Status
 - Wave 1 (Foundation): COMPLETE — config + math_utils, 25 tests
 - Wave 2 (Core Modules): COMPLETE — dynamics, control, sensors, 38 tests
-- Wave 3 (Estimation + Integration): COMPLETE — EKF, main loop, telemetry, server, 46 tests
+- Wave 3 (Estimation + Integration): COMPLETE — EKF, main loop, telemetry, server, 47 tests
 - Wave 4 (Frontend + Tests + Demos): NOT STARTED
 
-### Known Bug: Closed-Loop Altitude Divergence
-The full sim loop (`python main.py`) runs but the drone cannot hold altitude. Each subsystem works in isolation — the bug is in how EKF noise interacts with the altitude PID. See `.orchestrator/bugs/closed_loop_divergence.md` for full root cause analysis and fix options. Must be resolved before Wave 4 demos.
+### Resolved Bug: Closed-Loop Altitude Divergence
+The full sim loop (`python main.py`) now holds the 2 m hover target within the documented 0.5 m threshold. The final fix corrected quaternion propagation order for body-rate integration and changed attitude derivative damping to use bias-corrected gyro body rates. See `.orchestrator/bugs/closed_loop_divergence.md` for details.
 
 ## Key Design Decisions
 - 13-state EKF: [pos(3), vel(3), quat(4), gyro_bias(3)]

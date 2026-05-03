@@ -141,8 +141,8 @@ Agents are assigned per-wave. The table below shows the primary assignment:
 |------|--------|-------|
 | Wave 1: Foundation | COMPLETE | 25/25 tests pass. Config + math utils verified. |
 | Wave 2: Core Modules | COMPLETE | 38/38 tests pass. Dynamics, control, sensors verified. Hover stable. |
-| Wave 3: Estimation + Integration | COMPLETE | 46/46 tests pass. EKF, main loop, telemetry, server all wired. Known bug: closed-loop altitude divergence (see .orchestrator/bugs/). |
-| Wave 4: Frontend + Tests + Demos | NOT_STARTED | Unblocked. Bug fix needed before demos will produce clean plots. |
+| Wave 3: Estimation + Integration | COMPLETE | 47/47 tests pass. EKF, main loop, telemetry, server all wired. Closed-loop altitude divergence is resolved (see .orchestrator/bugs/closed_loop_divergence.md). |
+| Wave 4: Frontend + Tests + Demos | NOT_STARTED | Unblocked. Demos can build on the stable closed-loop hover regression. |
 
 ---
 
@@ -436,7 +436,7 @@ The EKF is the most complex module. Main loop wires everything together. Server 
 ### Task 3.2: Main Simulation Loop + Telemetry Logger
 - **Agent:** Agent 2
 - **Tool:** Codex
-- **Status:** DONE (with known bug — see .orchestrator/bugs/closed_loop_divergence.md)
+- **Status:** DONE (closed-loop divergence resolved — see .orchestrator/bugs/closed_loop_divergence.md)
 - **Description:**
   1. Create `main.py`:
      - `Simulation` class:
