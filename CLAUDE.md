@@ -40,10 +40,10 @@ demos/             # failure recovery demo scripts + output plots
 # Run tests
 pytest tests/ -v
 
-# Run simulation (once main.py is complete)
+# Run simulation
 python main.py
 
-# Run WebSocket server (once server is complete)
+# Run WebSocket server
 python -m uvicorn src.server.app:app --host 0.0.0.0 --port 8000
 
 # Run frontend
@@ -52,6 +52,15 @@ cd showcase/client && npm run dev
 
 ## Orchestration
 The project is built in waves using `.orchestrator/`. Each wave has instruction files for parallel agents in `.orchestrator/instructions/`. Status files go in `.orchestrator/status/`. See plan.md for current wave progress.
+
+### Wave Status
+- Wave 1 (Foundation): COMPLETE — config + math_utils, 25 tests
+- Wave 2 (Core Modules): COMPLETE — dynamics, control, sensors, 38 tests
+- Wave 3 (Estimation + Integration): COMPLETE — EKF, main loop, telemetry, server, 46 tests
+- Wave 4 (Frontend + Tests + Demos): NOT STARTED
+
+### Known Bug: Closed-Loop Altitude Divergence
+The full sim loop (`python main.py`) runs but the drone cannot hold altitude. Each subsystem works in isolation — the bug is in how EKF noise interacts with the altitude PID. See `.orchestrator/bugs/closed_loop_divergence.md` for full root cause analysis and fix options. Must be resolved before Wave 4 demos.
 
 ## Key Design Decisions
 - 13-state EKF: [pos(3), vel(3), quat(4), gyro_bias(3)]

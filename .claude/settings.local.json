@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\phine\\\\OneDrive\\\\Laptop\\\\CODESTUFF\\\\DRONE\\\\SkySense\" -Recurse -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object FullName)"
     ]
   }
 }

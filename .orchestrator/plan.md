@@ -140,9 +140,9 @@ Agents are assigned per-wave. The table below shows the primary assignment:
 | Wave | Status | Notes |
 |------|--------|-------|
 | Wave 1: Foundation | COMPLETE | 25/25 tests pass. Config + math utils verified. |
-| Wave 2: Core Modules | IN_PROGRESS | 3 agents assigned: dynamics, control, sensors |
-| Wave 3: Estimation + Integration | NOT_STARTED | Blocked on Wave 2 |
-| Wave 4: Frontend + Tests + Demos | NOT_STARTED | Blocked on Wave 3 |
+| Wave 2: Core Modules | COMPLETE | 38/38 tests pass. Dynamics, control, sensors verified. Hover stable. |
+| Wave 3: Estimation + Integration | COMPLETE | 46/46 tests pass. EKF, main loop, telemetry, server all wired. Known bug: closed-loop altitude divergence (see .orchestrator/bugs/). |
+| Wave 4: Frontend + Tests + Demos | NOT_STARTED | Unblocked. Bug fix needed before demos will produce clean plots. |
 
 ---
 
@@ -231,14 +231,14 @@ Everything downstream depends on this wave. Project restructure, config system, 
 
 ---
 
-## Wave 2: Core Simulation Modules (IN_PROGRESS)
+## Wave 2: Core Simulation Modules (COMPLETE)
 
 Three independent modules developed in parallel. All depend on Wave 1 (config + math_utils).
 
 ### Task 2.1: Drone Dynamics Model + Environment
 - **Agent:** Agent 1
 - **Tool:** Claude
-- **Status:** NOT_STARTED
+- **Status:** DONE
 - **Description:**
   1. Create `src/simulation/drone_model.py`:
      - `DroneState` dataclass: position(3), velocity(3), quaternion(4), angular_velocity(3) — all numpy arrays. NED frame.
@@ -284,7 +284,7 @@ Three independent modules developed in parallel. All depend on Wave 1 (config + 
 ### Task 2.2: Control System
 - **Agent:** Agent 2
 - **Tool:** Codex
-- **Status:** NOT_STARTED
+- **Status:** DONE
 - **Description:**
   1. Create `src/control/pid.py`:
      - `PIDController` class:
@@ -339,7 +339,7 @@ Three independent modules developed in parallel. All depend on Wave 1 (config + 
 ### Task 2.3: Sensor Simulation
 - **Agent:** Agent 3
 - **Tool:** Codex
-- **Status:** NOT_STARTED
+- **Status:** DONE
 - **Description:**
   1. Create `src/sensors/imu_sim.py`:
      - `IMUSim` class:
@@ -378,7 +378,7 @@ The EKF is the most complex module. Main loop wires everything together. Server 
 ### Task 3.1: 13-State Extended Kalman Filter
 - **Agent:** Agent 1
 - **Tool:** Claude
-- **Status:** NOT_STARTED
+- **Status:** DONE
 - **Description:**
   1. Create `src/navigation/ekf.py`:
      - `EKF` class with state vector x (13,), covariance P (13x13):
@@ -436,7 +436,7 @@ The EKF is the most complex module. Main loop wires everything together. Server 
 ### Task 3.2: Main Simulation Loop + Telemetry Logger
 - **Agent:** Agent 2
 - **Tool:** Codex
-- **Status:** NOT_STARTED
+- **Status:** DONE (with known bug — see .orchestrator/bugs/closed_loop_divergence.md)
 - **Description:**
   1. Create `main.py`:
      - `Simulation` class:
@@ -476,7 +476,7 @@ The EKF is the most complex module. Main loop wires everything together. Server 
 ### Task 3.3: WebSocket Server Evolution
 - **Agent:** Agent 3
 - **Tool:** Codex
-- **Status:** NOT_STARTED
+- **Status:** DONE
 - **Description:**
   1. Create `src/server/protocol.py`:
      - Define message types as dataclasses or TypedDicts:

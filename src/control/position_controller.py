@@ -36,7 +36,8 @@ class PositionController:
         desired = np.asarray(desired_pos, dtype=float)
         error_ned = desired - current
 
-        thrust = self.hover_thrust + self.z_pid.update(float(error_ned[2]), dt)
+        # Negate z-error: in NED, negative z = up, so negative error needs MORE thrust
+        thrust = self.hover_thrust - self.z_pid.update(float(error_ned[2]), dt)
         thrust = float(np.clip(thrust, 0.0, self.max_total_thrust))
 
         cos_yaw = np.cos(current_yaw)

@@ -78,7 +78,7 @@ class DroneModel:
 
         self.state.angular_velocity = omega + angular_acceleration * dt
         omega_quat = np.array([0.0, *self.state.angular_velocity], dtype=float)
-        q_dot = 0.5 * quat_multiply(omega_quat, q)
+        q_dot = 0.5 * quat_multiply(q, omega_quat)
         self.state.quaternion = quat_normalize(q + q_dot * dt)
 
         return self.state
