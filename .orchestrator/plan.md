@@ -142,7 +142,8 @@ Agents are assigned per-wave. The table below shows the primary assignment:
 | Wave 1: Foundation | COMPLETE | 25/25 tests pass. Config + math utils verified. |
 | Wave 2: Core Modules | COMPLETE | 38/38 tests pass. Dynamics, control, sensors verified. Hover stable. |
 | Wave 3: Estimation + Integration | COMPLETE | 47/47 tests pass. EKF, main loop, telemetry, server all wired. Closed-loop altitude divergence is resolved (see .orchestrator/bugs/closed_loop_divergence.md). |
-| Wave 4: Frontend + Tests + Demos | NOT_STARTED | Unblocked. Demos can build on the stable closed-loop hover regression. |
+| Wave 4: Frontend | COMPLETE | GNC dashboard rebuilt. 13 new files, TypeScript clean, old parts explorer deleted. |
+| Wave 5: Demos + Tests + Docs | IN_PROGRESS | Plotter, 5 failure demos, expanded test suite, doc updates. See instructions/wave5_plan.md. |
 
 ---
 
@@ -535,48 +536,22 @@ Final wave: React frontend evolution, failure demo scenarios, test suite, analys
 - **Files to avoid:** `src/simulation/`, `src/control/`, `src/navigation/`, `src/sensors/`, `main.py`, `showcase/`
 - **Completion notes:**
 
-### Task 4.2: React Frontend Evolution
-- **Agent:** Agent 2
-- **Tool:** Cursor
-- **Status:** NOT_STARTED
-- **Description:**
-  1. Update Zustand store (`useRobotModel.ts`) with GNC telemetry state:
-     - true_state, estimated_state, control outputs, sensor statuses, ekf health, motor outputs
-  2. Create new WebSocket hook `useTelemetrySocket.ts`:
-     - Connects to `ws://localhost:8000/ws/telemetry`
-     - Parses TelemetryMessage, updates store
-     - Sends commands (disturbance, failure, reset) to server
-  3. Create `DroneAttitudeViewer` component:
-     - 3D quad model that rotates in real-time based on estimated roll/pitch/yaw
-     - Ghost/transparent model showing true state for comparison
-     - This replaces or augments the existing RobotViewer for GNC mode
-  4. Create `SensorStatusPanel` component:
-     - Shows each sensor: IMU (accel), IMU (gyro), Ultrasonic, LiDAR
-     - Color: green=healthy, yellow=degraded, red=failed
-     - Shows last reading values
-  5. Create `StateOverlay` component:
-     - Side-by-side or overlaid: true state vs estimated state
-     - Position, velocity, attitude as numeric readouts
-     - Divergence highlighted when estimation error grows
-  6. Create `SimControlPanel` component:
-     - Buttons: "Inject Wind Gust", "Kill Ultrasonic", "Degrade Accelerometer", "Full IMU Failure", "Recover All", "Reset Sim"
-     - Altitude target slider
-     - Each button sends the corresponding WebSocket command
-  7. Create `MotorOutputBars` component:
-     - 4 vertical bars (M1-M4) showing current thrust percentage
-     - Color-coded: green normal, orange high, red saturated
-  8. Update `App.tsx` to compose new layout with all GNC components
-  9. Keep existing LidarOverlay functional (it still works with obstacle data in telemetry)
-- **Produces:** Interactive GNC dashboard. The demo and portfolio showpiece.
+### Task 4.2: React Frontend — GNC Dashboard (RE-PLANNED)
+- **Status:** DONE
+- **Description:** Rebuilt as a 3-agent parallel build. See `.orchestrator/instructions/wave4_frontend_plan.md` for full decisions and `agent_a_wave4.md`, `agent_b_wave4.md`, `agent_c_wave4.md` for per-agent instructions.
+- **Sub-tasks:**
+  - **4.2a (Agent A — Data Layer):** Types, Zustand store, WebSocket hook, status classifier. RUNS FIRST.
+  - **4.2b (Agent B — 3D Viewer):** Rewrite RobotViewer → DroneViewer with IMU rotation, ghost model, motor colors. Runs after A.
+  - **4.2c (Agent C — UI Panels):** SystemStatus, FailureControls, TelemetryPanel, MotorBars, TelemetryGraphs, ConnectionBadge, App.tsx layout. Runs after A, parallel with B.
 - **Depends on:** Task 3.3 (WebSocket server + protocol)
 - **Files in scope:** `showcase/client/src/` (all files)
 - **Files to avoid:** All `src/` Python files, `main.py`, `demos/`
-- **Completion notes:**
+- **Completion notes:** Frontend rebuilt as GNC telemetry dashboard. 13 new files: DroneViewer, SystemStatus, FailureControls, TelemetryPanel, MotorBars, TelemetryGraphs, ConnectionBadge, useGNCStore, useTelemetrySocket, telemetry types, statusClassifier. TypeScript clean. Old parts-explorer components deleted.
 
 ### Task 4.3: Unit Test Suite
 - **Agent:** Agent 3
 - **Tool:** Codex
-- **Status:** NOT_STARTED
+- **Status:** DONE
 - **Description:**
   1. Create `tests/test_drone_model.py`:
      - Free fall: no thrust, position increases in Z (NED down) with gravity
@@ -596,7 +571,7 @@ Final wave: React frontend evolution, failure demo scenarios, test suite, analys
 - **Depends on:** All prior waves (tests import all modules)
 - **Files in scope:** `tests/` (all files)
 - **Files to avoid:** All `src/` files (read only), `main.py`, `showcase/`, `demos/`
-- **Completion notes:**
+- **Completion notes:** Added DroneModel and MotorModel physics tests plus expanded EKF coverage for gyro bias, altitude covariance growth without updates, and acceleration-driven velocity changes. Full test suite passes with 76 tests.
 
 ---
 

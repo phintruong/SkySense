@@ -3,7 +3,9 @@
     "allow": [
       "Bash(npx tsc:*)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\phine\\\\OneDrive\\\\Laptop\\\\CODESTUFF\\\\DRONE\\\\SkySense\" -Recurse -ErrorAction SilentlyContinue)",
-      "Bash(Select-Object FullName)"
+      "Bash(Select-Object FullName)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\phine\\\\OneDrive\\\\Laptop\\\\CODESTUFF\\\\DRONE\\\\SkySense\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)"
     ]
   }
 }

@@ -85,3 +85,53 @@ def test_state_estimator_skips_invalid_altitude():
     estimator = StateEstimator(SimParams())
     estimator.update_altitude({"altitude": 2.0, "valid": False})
     np.testing.assert_allclose(estimator.get_state()["position"], [0.0, 0.0, 0.0])
+
+
+def test_bias_estimation_convergence(sim_params):
+    """EKF should estimate a known gyro bias over time."""
+    rng = np.random.default_rng(7)
+    ekf = EKF(sim_params)
+    true_bias = np.array([0.05, -0.03, 0.02])
+    dt = 0.005
+    for i in range(2000):
+        gyro = true_bias + rng.normal(0.0, 0.01, 3)
+        accel = np.array([0.0, 0.0, -9.81])
+        ekf.predict(gyro, accel, dt)
+        ekf.update_accel(accel)
+        if i % 10 == 0:
+            ekf.update_altitude(2.0)
+    estimated_bias = ekf.x[10:13]
+    assert np.linalg.norm(estimated_bias - true_bias) < np.linalg.norm(true_bias)
+
+
+def test_altitude_covariance_grows_without_updates(sim_params):
+    """Z position covariance should grow when altitude updates stop."""
+    ekf = EKF(sim_params)
+    dt = 0.005
+    for _ in range(100):
+        ekf.predict(np.zeros(3), np.array([0.0, 0.0, -9.81]), dt)
+        ekf.update_altitude(2.0)
+    cov_with_updates = ekf.P[2, 2]
+
+    for _ in range(200):
+        ekf.predict(np.zeros(3), np.array([0.0, 0.0, -9.81]), dt)
+    cov_without_updates = ekf.P[2, 2]
+
+    assert cov_without_updates > cov_with_updates * 2.0
+
+
+def test_velocity_estimation_with_accel(sim_params):
+    """EKF velocity should roughly track when acceleration is applied."""
+    ekf = EKF(sim_params)
+    dt = 0.005
+    for _ in range(100):
+        ekf.predict(np.zeros(3), np.array([0.0, 0.0, -9.81]), dt)
+        ekf.update_accel(np.array([0.0, 0.0, -9.81]))
+        ekf.update_altitude(2.0)
+    initial_vz = ekf.x[5]
+
+    for _ in range(100):
+        ekf.predict(np.zeros(3), np.array([0.0, 0.0, -8.0]), dt)
+    final_vz = ekf.x[5]
+
+    assert abs(final_vz - initial_vz) > 0.01

@@ -26,7 +26,7 @@ Main flight stack:
 - `src/control/`: PID, attitude controller, position controller, motor mixer.
 - `src/telemetry/`: `DataLogger`.
 - `src/server/`: FastAPI telemetry server and protocol.
-- `showcase/client/`: React/Three.js frontend, planned to evolve into GNC dashboard.
+- `showcase/client/`: React/Three.js GNC telemetry dashboard.
 
 Legacy/reference areas:
 - `Logic/`: original LiDAR backend; do not use for new GNC work except as reference.
@@ -37,7 +37,8 @@ Legacy/reference areas:
 - Wave 2 dynamics/control/sensors: complete.
 - Wave 3 EKF/main loop/telemetry/server: complete.
 - Closed-loop divergence bug: resolved.
-- Wave 4 frontend, demos, and expanded tests: next major work.
+- Wave 4 frontend: complete. GNC dashboard rebuilt from scratch (parts explorer replaced).
+- Wave 5 demos/tests/docs: in progress.
 
 ## Closed-Loop Stability Fix
 The old docs may mention active altitude divergence. The resolved source of the final instability was attitude feedback coupling:
@@ -70,7 +71,8 @@ Expected current result: all tests pass, and `python main.py` ends within `0.5 m
 ## Server And Frontend
 - New server entrypoint: `python -m uvicorn src.server.app:app --host 0.0.0.0 --port 8000`.
 - Telemetry WebSocket: `/ws/telemetry`.
-- Legacy LiDAR frontend expects `/ws/lidar`; Wave 4 should move it to the new telemetry protocol.
+- Frontend is the Wave 4 GNC dashboard and connects to `ws://localhost:8000/ws/telemetry`.
+- Dashboard features include 3D attitude visualization, true-vs-estimated ghost model, system health, failure controls, motor bars, and telemetry graphs.
 - Frontend dev command:
   ```bash
   cd showcase/client
@@ -90,4 +92,3 @@ python main.py
 - Do not change frame conventions casually. Most bugs in this repo come from NED/body/quaternion sign mistakes.
 - If a doc conflicts with `AGENTS.md` and `.orchestrator/bugs/closed_loop_divergence.md`, trust the resolved bug note and current tests.
 - Keep generated caches (`__pycache__`, `.pytest_cache`, frontend build output) out of meaningful changes.
-
