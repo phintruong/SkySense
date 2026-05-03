@@ -130,7 +130,7 @@ export default function LidarOverlay() {
           style={{ backgroundColor: lidar.connected ? '#22c55e' : '#ef4444' }}
         />
         <span className="text-[10px] text-gray-400 uppercase tracking-wider">
-          {lidar.connected ? 'LiDAR Live' : 'Disconnected'}
+          {lidar.connected ? 'Telemetry Live' : 'Disconnected'}
         </span>
       </div>
 

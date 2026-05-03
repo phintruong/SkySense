@@ -20,9 +20,11 @@ class Simulation:
         self.imu = IMUSim(self.sim_params)
         self.ultrasonic = UltrasonicSim(self.sim_params)
         self.estimator = StateEstimator(self.sim_params)
-        self.attitude_ctrl = AttitudeController()
-        self.position_ctrl = PositionController(
-            hover_thrust=self.drone_params.mass * self.drone_params.gravity,
+        hover_thrust = self.drone_params.mass * self.drone_params.gravity
+        self.attitude_ctrl = AttitudeController.from_sim_params(self.sim_params)
+        self.position_ctrl = PositionController.from_sim_params(
+            self.sim_params,
+            hover_thrust=hover_thrust,
         )
         self.mixer = MotorMixer(self.drone_params)
         self.logger = DataLogger()
@@ -31,11 +33,13 @@ class Simulation:
         self.step_count = 0
         self.target_position = np.array([0.0, 0.0, -2.0])
 
-        self._ultrasonic_interval = int(
-            self.sim_params.imu_rate_hz / self.sim_params.ultrasonic_rate_hz
+        self._ultrasonic_interval = self._rate_interval(
+            self.sim_params.imu_rate_hz,
+            self.sim_params.ultrasonic_rate_hz,
+            "ultrasonic",
         )
 
-        self._last_thrust = self.drone_params.mass * self.drone_params.gravity
+        self._last_thrust = hover_thrust
         self._last_torques = np.zeros(3)
         self._last_motor_commands = np.zeros(4)
         self._last_motor_actual = np.zeros(4)
@@ -43,11 +47,27 @@ class Simulation:
         self._desired_pitch = 0.0
         self._desired_yaw = 0.0
 
-        # Outer loop (position control) at 50 Hz, inner loop (attitude) at 200 Hz
-        self._position_ctrl_interval = int(self.sim_params.imu_rate_hz / 50.0)
+        # Outer loop (position control) at 50 Hz, inner loop (attitude) at IMU rate.
+        self._position_ctrl_interval = self._rate_interval(
+            self.sim_params.imu_rate_hz,
+            50.0,
+            "position controller",
+        )
         self._last_altitude = -self.target_position[2]
 
         self._initialize_at_hover()
+
+    @staticmethod
+    def _rate_interval(base_rate_hz: float, update_rate_hz: float, name: str) -> int:
+        if base_rate_hz <= 0.0 or update_rate_hz <= 0.0:
+            raise ValueError(f"{name} rates must be positive")
+        if update_rate_hz > base_rate_hz:
+            raise ValueError(f"{name} rate cannot exceed base IMU rate")
+        interval = int(round(base_rate_hz / update_rate_hz))
+        actual_rate_hz = base_rate_hz / interval
+        if not np.isclose(actual_rate_hz, update_rate_hz):
+            raise ValueError(f"{name} rate must divide the base IMU rate")
+        return interval
 
     def _initialize_at_hover(self):
         from src.simulation import DroneState

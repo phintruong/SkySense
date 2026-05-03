@@ -61,7 +61,7 @@ class EKF:
         if self._is_gated(y, S):
             return
 
-        K = self.P @ H.T @ np.linalg.inv(S)
+        K = self._kalman_gain(H, S)
         self.x = self.x + K @ y
         self._normalize_state_quaternion()
         I = np.eye(13, dtype=float)
@@ -80,7 +80,7 @@ class EKF:
         if self._is_gated(y, S):
             return
 
-        K = self.P @ H.T @ np.linalg.inv(S)
+        K = self._kalman_gain(H, S)
         self.x = self.x + (K @ y).reshape(13)
         self._normalize_state_quaternion()
         I = np.eye(13, dtype=float)
@@ -135,8 +135,10 @@ class EKF:
         dt: float,
     ) -> np.ndarray:
         eps = 1.0e-6
-        F = np.zeros((13, 13), dtype=float)
-        for i in range(13):
+        F = np.eye(13, dtype=float)
+        F[0:3, 3:6] = np.eye(3, dtype=float) * dt
+
+        for i in range(6, 13):
             dx = np.zeros(13, dtype=float)
             dx[i] = eps
             x_plus = x + dx
@@ -182,6 +184,9 @@ class EKF:
         statistical_gate = self.params.ekf_innovation_threshold * np.sqrt(float(np.trace(S)))
         gate = max(statistical_gate, self.params.ekf_innovation_threshold)
         return float(np.linalg.norm(innovation)) > gate
+
+    def _kalman_gain(self, H: np.ndarray, S: np.ndarray) -> np.ndarray:
+        return np.linalg.solve(S, H @ self.P.T).T
 
     def _normalize_state_quaternion(self):
         self.x[6:10] = quat_normalize(self.x[6:10])

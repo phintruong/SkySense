@@ -22,6 +22,19 @@ class PositionController:
         self.max_tilt = max_tilt
         self.max_total_thrust = 48.0
 
+    @classmethod
+    def from_sim_params(cls, params, hover_thrust: float) -> "PositionController":
+        return cls(
+            pos_kp=params.position_kp,
+            pos_ki=params.position_ki,
+            pos_kd=params.position_kd,
+            alt_kp=params.altitude_kp,
+            alt_ki=params.altitude_ki,
+            alt_kd=params.altitude_kd,
+            max_tilt=params.max_tilt_angle,
+            hover_thrust=hover_thrust,
+        )
+
     def compute(
         self,
         current_pos: np.ndarray,

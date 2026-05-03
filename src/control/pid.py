@@ -33,6 +33,15 @@ class PIDController:
         output = self.kp * error + self.ki * self._integral + self.kd * derivative
         return float(np.clip(output, self.output_min, self.output_max))
 
+    def update_with_measured_rate(self, error: float, measured_rate: float, dt: float) -> float:
+        """Compute PI output with derivative damping from a measured rate."""
+        self._integral += error * dt
+        self._integral = float(np.clip(self._integral, -self.integral_max, self.integral_max))
+        self._prev_error = error
+
+        output = self.kp * error + self.ki * self._integral - self.kd * measured_rate
+        return float(np.clip(output, self.output_min, self.output_max))
+
     def reset(self) -> None:
         """Zero integral and previous error."""
         self._integral = 0.0
