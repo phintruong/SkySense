@@ -33,19 +33,37 @@ All design decisions have been locked. This plan is ground truth for all future 
 | Timeline | None. Build it right. |
 | User math level | Linear algebra solid. Quaternions, EKF, PID, rigid body dynamics are new. |
 
-### Current Codebase State
+### Current Codebase State (after Wave 1)
 ```
-Logic/
-  core/logic.py           # obstacle detection (keep, move)
-  hardware/
-    rplidar_reader.py      # RPLIDAR A1 driver (keep, move)
-    hc_sr04_distance.py    # HC-SR04 ultrasonic (keep, move)
-  visualization/
-    lidar_visualization.py # Pygame radar (drop pygame dep)
-  rplidar_ros2/            # ROS2 node (move to legacy/)
-  main.py                  # hardware detection loop
-  server.py                # FastAPI WebSocket server (evolve)
-showcase/client/           # React Three.js frontend (evolve)
+src/
+  config/
+    drone_params.py         # DroneParams dataclass (DONE)
+    sim_params.py           # SimParams dataclass (DONE)
+  math_utils/
+    quaternion.py           # 7 quaternion ops (DONE, 13 tests passing)
+    rotations.py            # 6 rotation conversions (DONE, 12 tests passing)
+  simulation/               # empty, Wave 2
+  sensors/
+    lidar.py                # moved RPLIDAR driver (DONE)
+    ultrasonic.py           # moved HC-SR04 driver (DONE)
+    imu_sim.py              # Wave 2
+    ultrasonic_sim.py       # Wave 2
+  navigation/
+    obstacle_detector.py    # moved logic.py (DONE)
+    ekf.py                  # Wave 3
+    state_estimator.py      # Wave 3
+  control/                  # Wave 2
+  telemetry/                # Wave 3
+  server/                   # Wave 3
+tests/
+  conftest.py               # DroneParams/SimParams fixtures (DONE)
+  test_quaternion.py        # 13 tests (DONE)
+  test_rotations.py         # 12 tests (DONE)
+requirements.txt            # (DONE)
+legacy/
+  rplidar_ros2/             # preserved ROS2 node (DONE)
+Logic/                      # legacy — server.py, main.py, visualization still here
+showcase/client/            # React Three.js frontend (untouched, Wave 4)
 ```
 
 ### Target Project Structure
@@ -117,7 +135,18 @@ Agents are assigned per-wave. The table below shows the primary assignment:
 
 ---
 
-## Wave 1: Foundation
+## Wave Progress
+
+| Wave | Status | Notes |
+|------|--------|-------|
+| Wave 1: Foundation | COMPLETE | 25/25 tests pass. Config + math utils verified. |
+| Wave 2: Core Modules | IN_PROGRESS | 3 agents assigned: dynamics, control, sensors |
+| Wave 3: Estimation + Integration | NOT_STARTED | Blocked on Wave 2 |
+| Wave 4: Frontend + Tests + Demos | NOT_STARTED | Blocked on Wave 3 |
+
+---
+
+## Wave 1: Foundation (COMPLETE)
 
 Everything downstream depends on this wave. Project restructure, config system, and math utilities.
 
@@ -156,7 +185,7 @@ Everything downstream depends on this wave. Project restructure, config system, 
 - **Depends on:** Nothing
 - **Files in scope:** `src/config/`, `src/*/__init__.py`, `legacy/`, `tests/conftest.py`, `tests/__init__.py`, `requirements.txt`, file moves from `Logic/`
 - **Files to avoid:** `src/math_utils/quaternion.py`, `src/math_utils/rotations.py` (owned by Agent 2)
-- **Completion notes:**
+- **Completion notes:** Created full src/ tree, moved 3 files, ROS2 to legacy, deleted duplicate. DroneParams + SimParams dataclasses with all defaults. requirements.txt and test fixtures ready.
 
 ### Task 1.2: Math Utilities + Pytest Setup
 - **Agent:** Agent 2
@@ -198,11 +227,11 @@ Everything downstream depends on this wave. Project restructure, config system, 
 - **Depends on:** Nothing (only needs numpy, no project imports)
 - **Files in scope:** `src/math_utils/quaternion.py`, `src/math_utils/rotations.py`, `src/math_utils/__init__.py`, `tests/test_quaternion.py`, `tests/test_rotations.py`
 - **Files to avoid:** Everything in `src/config/`, `src/simulation/`, `src/sensors/`, `src/navigation/`, `src/control/`, `src/telemetry/`, `src/server/`
-- **Completion notes:**
+- **Completion notes:** 7 quaternion functions + 6 rotation functions. 25 tests total (13 quaternion, 12 rotation), all passing. Hamilton convention, NED 3-2-1, Shepperd's method for matrix-to-quat.
 
 ---
 
-## Wave 2: Core Simulation Modules
+## Wave 2: Core Simulation Modules (IN_PROGRESS)
 
 Three independent modules developed in parallel. All depend on Wave 1 (config + math_utils).
 

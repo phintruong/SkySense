@@ -1,7 +1,9 @@
 # Showcase — React/Three.js Frontend
 
+> **Wave 4** will evolve this into a full GNC telemetry dashboard. See `.orchestrator/plan.md` Task 4.2 for the spec: 3D attitude viz, sensor status panel, true vs estimated state overlay, sim control panel, motor output bars.
+
 ## Overview
-Interactive 3D drone model viewer with live LiDAR visualization. Built with React, Three.js (via React Three Fiber), Zustand for state, and Tailwind for styling. Connects to the Python backend via WebSocket for real-time sensor data.
+Currently: interactive 3D drone model viewer with live LiDAR visualization. Built with React, Three.js (via React Three Fiber), Zustand for state, and Tailwind for styling. Connects to the Python backend via WebSocket for real-time sensor data.
 
 ## Run
 ```bash
